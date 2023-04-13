@@ -511,7 +511,7 @@ func ParseRawConfig(rawCfg *RawConfig) (*Config, error) {
 	for _, t := range config.Tunnels {
 		if len(t.Proxy) > 0 {
 			if _, ok := config.Proxies[t.Proxy]; !ok {
-				return nil, fmt.Errorf("tunnel proxy %s not found", t.Proxy)
+				log.Errorln("tunnel proxy %s not found", t.Proxy)
 			}
 		}
 	}
