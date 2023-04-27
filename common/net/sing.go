@@ -3,6 +3,7 @@ package net
 import (
 	"context"
 	"net"
+	"runtime"
 
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/bufio"
@@ -19,17 +20,11 @@ type ExtendedWriter = network.ExtendedWriter
 type ExtendedReader = network.ExtendedReader
 
 func NewDeadlineConn(conn net.Conn) ExtendedConn {
-	if dc, ok := conn.(*deadline.Conn); ok {
-		return dc
-	}
-	return deadline.NewConn(conn)
+	return deadline.NewFallbackConn(conn)
 }
 
 func NewDeadlinePacketConn(pc net.PacketConn) net.PacketConn {
-	if dpc, ok := pc.(*deadline.PacketConn); ok {
-		return dpc
-	}
-	return deadline.NewPacketConn(bufio.NewPacketConn(pc))
+	return deadline.NewFallbackPacketConn(bufio.NewPacketConn(pc))
 }
 
 func NeedHandshake(conn any) bool {
@@ -39,7 +34,11 @@ func NeedHandshake(conn any) bool {
 	return false
 }
 
+type CountFunc = network.CountFunc
+
 // Relay copies between left and right bidirectionally.
 func Relay(leftConn, rightConn net.Conn) {
+	defer runtime.KeepAlive(leftConn)
+	defer runtime.KeepAlive(rightConn)
 	_ = bufio.CopyConn(context.TODO(), leftConn, rightConn)
 }

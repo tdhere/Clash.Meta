@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net"
 	"strings"
+	"syscall"
 
 	N "github.com/Dreamacro/clash/common/net"
 	"github.com/Dreamacro/clash/common/utils"
@@ -203,8 +204,19 @@ func (c *conn) Upstream() any {
 	return c.ExtendedConn
 }
 
+func (c *conn) WriterReplaceable() bool {
+	return true
+}
+
+func (c *conn) ReaderReplaceable() bool {
+	return true
+}
+
 func NewConn(c net.Conn, a C.ProxyAdapter) C.Conn {
-	return &conn{N.NewDeadlineConn(c), []string{a.Name()}, parseRemoteDestination(a.Addr())}
+	if _, ok := c.(syscall.Conn); !ok { // exclusion system conn like *net.TCPConn
+		c = N.NewDeadlineConn(c) // most conn from outbound can't handle readDeadline correctly
+	}
+	return &conn{N.NewExtendedConn(c), []string{a.Name()}, parseRemoteDestination(a.Addr())}
 }
 
 type packetConn struct {
@@ -235,7 +247,10 @@ func (c *packetConn) LocalAddr() net.Addr {
 }
 
 func newPacketConn(pc net.PacketConn, a C.ProxyAdapter) C.PacketConn {
-	return &packetConn{N.NewDeadlinePacketConn(pc), []string{a.Name()}, a.Name(), utils.NewUUIDV4().String(), parseRemoteDestination(a.Addr())}
+	if _, ok := pc.(syscall.Conn); !ok { // exclusion system conn like *net.UDPConn
+		pc = N.NewDeadlinePacketConn(pc) // most conn from outbound can't handle readDeadline correctly
+	}
+	return &packetConn{pc, []string{a.Name()}, a.Name(), utils.NewUUIDV4().String(), parseRemoteDestination(a.Addr())}
 }
 
 func parseRemoteDestination(addr string) string {

@@ -1,15 +1,18 @@
 package statistic
 
 import (
+	"io"
 	"net"
+	"net/netip"
 	"time"
 
+	"github.com/Dreamacro/clash/common/atomic"
 	"github.com/Dreamacro/clash/common/buf"
+	N "github.com/Dreamacro/clash/common/net"
 	"github.com/Dreamacro/clash/common/utils"
 	C "github.com/Dreamacro/clash/constant"
 
 	"github.com/gofrs/uuid/v5"
-	"go.uber.org/atomic"
 )
 
 type tracker interface {
@@ -61,6 +64,15 @@ func (tt *tcpTracker) ReadBuffer(buffer *buf.Buffer) (err error) {
 	return
 }
 
+func (tt *tcpTracker) UnwrapReader() (io.Reader, []N.CountFunc) {
+	return tt.Conn, []N.CountFunc{func(download int64) {
+		if tt.pushToManager {
+			tt.manager.PushDownloaded(download)
+		}
+		tt.DownloadTotal.Add(download)
+	}}
+}
+
 func (tt *tcpTracker) Write(b []byte) (int, error) {
 	n, err := tt.Conn.Write(b)
 	upload := int64(n)
@@ -81,6 +93,15 @@ func (tt *tcpTracker) WriteBuffer(buffer *buf.Buffer) (err error) {
 	return
 }
 
+func (tt *tcpTracker) UnwrapWriter() (io.Writer, []N.CountFunc) {
+	return tt.Conn, []N.CountFunc{func(upload int64) {
+		if tt.pushToManager {
+			tt.manager.PushUploaded(upload)
+		}
+		tt.UploadTotal.Add(upload)
+	}}
+}
+
 func (tt *tcpTracker) Close() error {
 	tt.manager.Leave(tt)
 	return tt.Conn.Close()
@@ -90,13 +111,24 @@ func (tt *tcpTracker) Upstream() any {
 	return tt.Conn
 }
 
+func parseRemoteDestination(addr net.Addr, conn C.Connection) string {
+	if addr == nil && conn != nil {
+		return conn.RemoteDestination()
+	}
+	if addrPort, err := netip.ParseAddrPort(addr.String()); err == nil && addrPort.Addr().IsValid() {
+		return addrPort.Addr().String()
+	} else {
+		if conn != nil {
+			return conn.RemoteDestination()
+		} else {
+			return ""
+		}
+	}
+}
+
 func NewTCPTracker(conn C.Conn, manager *Manager, metadata *C.Metadata, rule C.Rule, uploadTotal int64, downloadTotal int64, pushToManager bool) *tcpTracker {
 	if conn != nil {
-		if tcpAddr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
-			metadata.RemoteDst = tcpAddr.IP.String()
-		} else {
-			metadata.RemoteDst = conn.RemoteDestination()
-		}
+		metadata.RemoteDst = parseRemoteDestination(conn.RemoteAddr(), conn)
 	}
 
 	t := &tcpTracker{
@@ -170,7 +202,7 @@ func (ut *udpTracker) Close() error {
 }
 
 func NewUDPTracker(conn C.PacketConn, manager *Manager, metadata *C.Metadata, rule C.Rule, uploadTotal int64, downloadTotal int64, pushToManager bool) *udpTracker {
-	metadata.RemoteDst = conn.RemoteDestination()
+	metadata.RemoteDst = parseRemoteDestination(nil, conn)
 
 	ut := &udpTracker{
 		PacketConn: conn,
