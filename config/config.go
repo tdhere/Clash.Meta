@@ -534,7 +534,7 @@ func parseGeneral(cfg *RawConfig) (*General, error) {
 	if externalUI != "" {
 		externalUI = C.Path.Resolve(externalUI)
 		if _, err := os.Stat(externalUI); os.IsNotExist(err) {
-			return nil, fmt.Errorf("external-ui: %s not exist", externalUI)
+			fmt.Errorf("external-ui: %s not exist", externalUI)
 		}
 	}
 	cfg.Tun.RedirectToTun = cfg.EBpf.RedirectToTun
@@ -841,7 +841,7 @@ func parseHosts(cfg *RawConfig) (*trie.DomainTrie[resolver.HostValue], error) {
 				} else {
 					ips := make([]netip.Addr, 0)
 					for _, addr := range addrs {
-						if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback()&&!ipnet.IP.IsLinkLocalUnicast() {
+						if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() && !ipnet.IP.IsLinkLocalUnicast() {
 							if ip, err := netip.ParseAddr(ipnet.IP.String()); err == nil {
 								ips = append(ips, ip)
 							}
