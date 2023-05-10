@@ -18,6 +18,7 @@ import (
 	mux "github.com/sagernet/sing-mux"
 	vmess "github.com/sagernet/sing-vmess"
 	"github.com/sagernet/sing/common/buf"
+	"github.com/sagernet/sing/common/bufio"
 	"github.com/sagernet/sing/common/bufio/deadline"
 	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
@@ -104,6 +105,9 @@ func (h *ListenerHandler) NewPacketConnection(ctx context.Context, conn network.
 		additions = slices.Clone(additions)
 		additions = append(additions, ctxAdditions...)
 	}
+	if deadline.NeedAdditionalReadDeadline(conn) {
+		conn = N.NewDeadlinePacketConn(bufio.NewNetPacketConn(conn)) // conn from sing should check NeedAdditionalReadDeadline
+	}
 	defer func() { _ = conn.Close() }()
 	mutex := sync.Mutex{}
 	conn2 := conn // a new interface to set nil in defer
@@ -112,11 +116,26 @@ func (h *ListenerHandler) NewPacketConnection(ctx context.Context, conn network.
 		defer mutex.Unlock()
 		conn2 = nil
 	}()
+	readWaiter, isReadWaiter := bufio.CreatePacketReadWaiter(conn)
 	for {
-		buff := buf.NewPacket() // do not use stack buffer
-		dest, err := conn.ReadPacket(buff)
+		var (
+			buff *buf.Buffer
+			dest M.Socksaddr
+			err  error
+		)
+		newBuffer := func() *buf.Buffer {
+			buff = buf.NewPacket() // do not use stack buffer
+			return buff
+		}
+		if isReadWaiter {
+			dest, err = readWaiter.WaitReadPacket(newBuffer)
+		} else {
+			dest, err = conn.ReadPacket(newBuffer())
+		}
 		if err != nil {
-			buff.Release()
+			if buff != nil {
+				buff.Release()
+			}
 			if ShouldIgnorePacketError(err) {
 				break
 			}
