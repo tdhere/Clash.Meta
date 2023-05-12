@@ -3,6 +3,7 @@ package dialer
 import (
 	"context"
 	"fmt"
+	"github.com/Dreamacro/clash/log"
 	"net"
 	"net/netip"
 	"os"
@@ -232,6 +233,7 @@ func parallelDialContext(ctx context.Context, network string, ips []netip.Addr, 
 	}
 
 	for _, ip := range ips {
+		log.Debugln("parallelDialContext : %s", ip)
 		go racer(ctx, ip)
 	}
 	var errs []error
