@@ -7,7 +7,6 @@ import (
 	"time"
 
 	N "github.com/Dreamacro/clash/common/net"
-	"github.com/Dreamacro/clash/common/pool"
 	C "github.com/Dreamacro/clash/constant"
 	"github.com/Dreamacro/clash/log"
 )
@@ -27,18 +26,16 @@ func handleUDPToRemote(packet C.UDPPacket, pc C.PacketConn, metadata *C.Metadata
 	return nil
 }
 
-func handleUDPToLocal(packet C.UDPPacket, pc net.PacketConn, key string, oAddr, fAddr netip.Addr) {
-	buf := pool.Get(pool.UDPBufferSize)
+func handleUDPToLocal(packet C.UDPPacket, pc N.EnhancePacketConn, key string, oAddr, fAddr netip.Addr) {
 	defer func() {
 		_ = pc.Close()
 		closeAllLocalCoon(key)
 		natTable.Delete(key)
-		_ = pool.Put(buf)
 	}()
 
 	for {
 		_ = pc.SetReadDeadline(time.Now().Add(udpTimeout))
-		n, from, err := pc.ReadFrom(buf)
+		data, put, from, err := pc.WaitReadFrom()
 		if err != nil {
 			return
 		}
@@ -47,14 +44,18 @@ func handleUDPToLocal(packet C.UDPPacket, pc net.PacketConn, key string, oAddr, 
 		_fromUDPAddr := *fromUDPAddr
 		fromUDPAddr = &_fromUDPAddr // make a copy
 		if fromAddr, ok := netip.AddrFromSlice(fromUDPAddr.IP); ok {
-			if fAddr.IsValid() && (oAddr.Unmap() == fromAddr.Unmap()) {
-				fromUDPAddr.IP = fAddr.Unmap().AsSlice()
-			} else {
-				fromUDPAddr.IP = fromAddr.Unmap().AsSlice()
+			fromAddr = fromAddr.Unmap()
+			if fAddr.IsValid() && (oAddr.Unmap() == fromAddr) {
+				fromAddr = fAddr.Unmap()
+			}
+			fromUDPAddr.IP = fromAddr.AsSlice()
+			if fromAddr.Is4() {
+				fromUDPAddr.Zone = "" // only ipv6 can have the zone
 			}
 		}
 
-		_, err = packet.WriteBack(buf[:n], fromUDPAddr)
+		_, err = packet.WriteBack(data, fromUDPAddr)
+		put()
 		if err != nil {
 			return
 		}

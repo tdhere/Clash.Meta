@@ -92,19 +92,23 @@ func New(config LC.ShadowsocksServer, tcpIn chan<- C.ConnContext, udpIn chan<- C
 
 			go func() {
 				conn := bufio.NewPacketConn(ul)
+				var buff *buf.Buffer
+				newBuffer := func() *buf.Buffer {
+					buff = buf.NewPacket() // do not use stack buffer
+					return buff
+				}
 				readWaiter, isReadWaiter := bufio.CreatePacketReadWaiter(conn)
+				if isReadWaiter {
+					readWaiter.InitializeReadWaiter(newBuffer)
+				}
 				for {
 					var (
-						buff *buf.Buffer
 						dest M.Socksaddr
 						err  error
 					)
-					newBuffer := func() *buf.Buffer {
-						buff = buf.NewPacket() // do not use stack buffer
-						return buff
-					}
+					buff = nil // clear last loop status, avoid repeat release
 					if isReadWaiter {
-						dest, err = readWaiter.WaitReadPacket(newBuffer)
+						dest, err = readWaiter.WaitReadPacket()
 					} else {
 						dest, err = conn.ReadPacket(newBuffer())
 					}

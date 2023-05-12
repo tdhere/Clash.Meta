@@ -58,6 +58,14 @@ func (c *waitCloseConn) Upstream() any {
 	return c.ExtendedConn
 }
 
+func (c *waitCloseConn) ReaderReplaceable() bool {
+	return true
+}
+
+func (c *waitCloseConn) WriterReplaceable() bool {
+	return true
+}
+
 func UpstreamMetadata(metadata M.Metadata) M.Metadata {
 	return M.Metadata{
 		Source:      metadata.Source,
@@ -106,7 +114,7 @@ func (h *ListenerHandler) NewPacketConnection(ctx context.Context, conn network.
 		additions = append(additions, ctxAdditions...)
 	}
 	if deadline.NeedAdditionalReadDeadline(conn) {
-		conn = N.NewDeadlinePacketConn(bufio.NewNetPacketConn(conn)) // conn from sing should check NeedAdditionalReadDeadline
+		conn = deadline.NewFallbackPacketConn(bufio.NewNetPacketConn(conn)) // conn from sing should check NeedAdditionalReadDeadline
 	}
 	defer func() { _ = conn.Close() }()
 	mutex := sync.Mutex{}
@@ -116,19 +124,23 @@ func (h *ListenerHandler) NewPacketConnection(ctx context.Context, conn network.
 		defer mutex.Unlock()
 		conn2 = nil
 	}()
+	var buff *buf.Buffer
+	newBuffer := func() *buf.Buffer {
+		buff = buf.NewPacket() // do not use stack buffer
+		return buff
+	}
 	readWaiter, isReadWaiter := bufio.CreatePacketReadWaiter(conn)
+	if isReadWaiter {
+		readWaiter.InitializeReadWaiter(newBuffer)
+	}
 	for {
 		var (
-			buff *buf.Buffer
 			dest M.Socksaddr
 			err  error
 		)
-		newBuffer := func() *buf.Buffer {
-			buff = buf.NewPacket() // do not use stack buffer
-			return buff
-		}
+		buff = nil // clear last loop status, avoid repeat release
 		if isReadWaiter {
-			dest, err = readWaiter.WaitReadPacket(newBuffer)
+			dest, err = readWaiter.WaitReadPacket()
 		} else {
 			dest, err = conn.ReadPacket(newBuffer())
 		}
