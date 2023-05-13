@@ -5,8 +5,6 @@ import (
 	"encoding/binary"
 
 	"github.com/Dreamacro/clash/common/buf"
-	"github.com/Dreamacro/clash/log"
-
 	"github.com/gofrs/uuid/v5"
 	"github.com/zhangyunhao116/fastrand"
 )
@@ -40,7 +38,7 @@ func WriteWithPadding(buffer *buf.Buffer, p []byte, command byte, userUUID *uuid
 	buffer.Write(p)
 
 	buffer.Extend(int(paddingLen))
-	log.Debugln("XTLS Vision write padding1: command=%v, payloadLen=%v, paddingLen=%v", command, contentLen, paddingLen)
+	//log.Debugln("XTLS Vision write padding1: command=%v, payloadLen=%v, paddingLen=%v", command, contentLen, paddingLen)
 }
 
 func ApplyPadding(buffer *buf.Buffer, command byte, userUUID *uuid.UUID, paddingTLS bool) {
@@ -63,7 +61,7 @@ func ApplyPadding(buffer *buf.Buffer, command byte, userUUID *uuid.UUID, padding
 	}
 
 	buffer.Extend(int(paddingLen))
-	log.Debugln("XTLS Vision write padding2: command=%d, payloadLen=%d, paddingLen=%d", command, contentLen, paddingLen)
+	//log.Debugln("XTLS Vision write padding2: command=%d, payloadLen=%d, paddingLen=%d", command, contentLen, paddingLen)
 }
 
 func ReshapeBuffer(buffer *buf.Buffer) *buf.Buffer {

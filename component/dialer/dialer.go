@@ -3,6 +3,7 @@ package dialer
 import (
 	"context"
 	"fmt"
+	"github.com/Dreamacro/clash/log"
 	"net"
 	"net/netip"
 	"os"
@@ -238,12 +239,14 @@ func parallelDialContext(ctx context.Context, network string, ips []netip.Addr, 
 	}
 
 	for _, ip := range ips {
+		log.Debugln("concurrent dial : %s", ip)
 		go racer(ctx, ip)
 	}
 	var errs []error
 	for i := 0; i < len(ips); i++ {
 		res := <-results
 		if res.error == nil {
+			log.Debugln("concurrent dial select : %s", res.ip)
 			return res.Conn, nil
 		}
 		errs = append(errs, res.error)
@@ -311,6 +314,9 @@ func parseAddr(ctx context.Context, network, address string, preferResolver reso
 		if ip.Is4In6() {
 			ips[i] = ip.Unmap()
 		}
+	}
+	if len(ips) > 3 {
+		ips = ips[:3]
 	}
 	return ips, port, nil
 }
