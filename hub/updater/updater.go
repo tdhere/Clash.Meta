@@ -133,12 +133,10 @@ func prepare(exePath string) (err error) {
 	//log.Infoln(packageName)
 	backupDir = filepath.Join(workDir, "meta-backup")
 
-	if runtime.GOOS == "windows" && runtime.GOARCH == "amd64" {
-		updateExeName = "clash.meta" + "-" + runtime.GOOS + "-" + runtime.GOARCH + "-compatible.exe"
-	} else if runtime.GOOS == "linux" && runtime.GOARCH == "amd64" {
-		updateExeName = "clash.meta" + "-" + runtime.GOOS + "-" + runtime.GOARCH + "-compatible"
+	if runtime.GOOS == "windows" {
+		updateExeName = "clash.meta" + "-" + runtime.GOOS + "-" + runtime.GOARCH + amd64Compatible + ".exe"
 	} else {
-		updateExeName = "clash.meta" + "-" + runtime.GOOS + "-" + runtime.GOARCH
+		updateExeName = "clash.meta" + "-" + runtime.GOOS + "-" + runtime.GOARCH + amd64Compatible
 	}
 
 	log.Infoln("updateExeName: %s ", updateExeName)

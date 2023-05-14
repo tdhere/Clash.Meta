@@ -36,7 +36,7 @@ func AddCertificate(certificate string) error {
 func initializeCertPool() {
 	var err error
 	certPool, err = x509.SystemCertPool()
-	if err == nil {
+	if err != nil {
 		certPool = x509.NewCertPool()
 	}
 	for _, cert := range trustCerts {
