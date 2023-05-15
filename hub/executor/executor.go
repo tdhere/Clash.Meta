@@ -206,7 +206,7 @@ func updateDNS(c *config.DNS, ruleProvider map[string]provider.RuleProvider, gen
 	cfg := dns.Config{
 		Main:         c.NameServer,
 		Fallback:     c.Fallback,
-		IPv6:         c.IPv6 && generalIPv6,
+		IPv6:         c.IPv6,
 		IPv6Timeout:  c.IPv6Timeout,
 		EnhancedMode: c.EnhancedMode,
 		Pool:         c.FakeIPRange,
