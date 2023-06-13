@@ -1,4 +1,4 @@
-package tuic
+package v4
 
 import (
 	"bufio"
@@ -11,19 +11,21 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Dreamacro/clash/adapter/inbound"
 	N "github.com/Dreamacro/clash/common/net"
 	"github.com/Dreamacro/clash/common/pool"
 	"github.com/Dreamacro/clash/common/utils"
 	C "github.com/Dreamacro/clash/constant"
 	"github.com/Dreamacro/clash/transport/socks5"
+	"github.com/Dreamacro/clash/transport/tuic/common"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/metacubex/quic-go"
 )
 
 type ServerOption struct {
-	HandleTcpFn func(conn net.Conn, addr socks5.Addr) error
-	HandleUdpFn func(addr socks5.Addr, packet C.UDPPacket) error
+	HandleTcpFn func(conn net.Conn, addr socks5.Addr, additions ...inbound.Addition) error
+	HandleUdpFn func(addr socks5.Addr, packet C.UDPPacket, additions ...inbound.Addition) error
 
 	TlsConfig             *tls.Config
 	QuicConfig            *quic.Config
@@ -55,7 +57,7 @@ func (s *Server) Serve() error {
 		if err != nil {
 			return err
 		}
-		SetCongestionController(conn, s.CongestionController)
+		common.SetCongestionController(conn, s.CongestionController)
 		h := &serverHandler{
 			Server:   s,
 			quicConn: conn,
@@ -116,12 +118,12 @@ func (s *serverHandler) handleMessage() (err error) {
 			if err != nil {
 				return
 			}
-			return s.parsePacket(packet, "native")
+			return s.parsePacket(packet, common.NATIVE)
 		}()
 	}
 }
 
-func (s *serverHandler) parsePacket(packet Packet, udpRelayMode string) (err error) {
+func (s *serverHandler) parsePacket(packet Packet, udpRelayMode common.UdpRelayMode) (err error) {
 	<-s.authCh
 	if !s.authOk {
 		return
@@ -162,11 +164,12 @@ func (s *serverHandler) handleStream() (err error) {
 			return err
 		}
 		go func() (err error) {
-			stream := &quicStreamConn{
-				Stream: quicStream,
-				lAddr:  s.quicConn.LocalAddr(),
-				rAddr:  s.quicConn.RemoteAddr(),
-			}
+			stream := common.NewQuicStreamConn(
+				quicStream,
+				s.quicConn.LocalAddr(),
+				s.quicConn.RemoteAddr(),
+				nil,
+			)
 			conn := N.NewBufferedConn(stream)
 			connect, err := ReadConnect(conn)
 			if err != nil {
@@ -224,18 +227,18 @@ func (s *serverHandler) handleUniStream() (err error) {
 				if err != nil {
 					return
 				}
-				ok := false
+				authOk := false
 				for _, tkn := range s.Tokens {
 					if authenticate.TKN == tkn {
-						ok = true
+						authOk = true
 						break
 					}
 				}
 				s.authOnce.Do(func() {
-					if !ok {
+					if !authOk {
 						_ = s.quicConn.CloseWithError(AuthenticationFailed, "AuthenticationFailed")
 					}
-					s.authOk = ok
+					s.authOk = authOk
 					close(s.authCh)
 				})
 			case PacketType:
@@ -244,7 +247,7 @@ func (s *serverHandler) handleUniStream() (err error) {
 				if err != nil {
 					return
 				}
-				return s.parsePacket(packet, "quic")
+				return s.parsePacket(packet, common.QUIC)
 			case DissociateType:
 				var disassociate Dissociate
 				disassociate, err = ReadDissociateWithHead(commandHead, reader)

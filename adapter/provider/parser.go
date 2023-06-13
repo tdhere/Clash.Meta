@@ -6,18 +6,23 @@ import (
 	"time"
 
 	"github.com/Dreamacro/clash/common/structure"
+	"github.com/Dreamacro/clash/common/utils"
 	"github.com/Dreamacro/clash/component/resource"
 	C "github.com/Dreamacro/clash/constant"
 	types "github.com/Dreamacro/clash/constant/provider"
 )
 
-var errVehicleType = errors.New("unsupport vehicle type")
+var (
+	errVehicleType = errors.New("unsupport vehicle type")
+	errSubPath     = errors.New("path is not subpath of home directory")
+)
 
 type healthCheckSchema struct {
-	Enable   bool   `provider:"enable"`
-	URL      string `provider:"url"`
-	Interval int    `provider:"interval"`
-	Lazy     bool   `provider:"lazy,omitempty"`
+	Enable         bool   `provider:"enable"`
+	URL            string `provider:"url"`
+	Interval       int    `provider:"interval"`
+	Lazy           bool   `provider:"lazy,omitempty"`
+	ExpectedStatus string `provider:"expected-status,omitempty"`
 }
 
 type proxyProviderSchema struct {
@@ -44,11 +49,16 @@ func ParseProxyProvider(name string, mapping map[string]any) (types.ProxyProvide
 		return nil, err
 	}
 
+	expectedStatus, err := utils.NewIntRanges[uint16](schema.HealthCheck.ExpectedStatus)
+	if err != nil {
+		return nil, err
+	}
+
 	var hcInterval uint
 	if schema.HealthCheck.Enable {
 		hcInterval = uint(schema.HealthCheck.Interval)
 	}
-	hc := NewHealthCheck([]C.Proxy{}, schema.HealthCheck.URL, hcInterval, schema.HealthCheck.Lazy)
+	hc := NewHealthCheck([]C.Proxy{}, schema.HealthCheck.URL, hcInterval, schema.HealthCheck.Lazy, expectedStatus)
 
 	path := C.Path.Resolve(schema.Path)
 
@@ -57,6 +67,9 @@ func ParseProxyProvider(name string, mapping map[string]any) (types.ProxyProvide
 	case "file":
 		vehicle = resource.NewFileVehicle(path)
 	case "http":
+		if !C.Path.IsSafePath(path) {
+			return nil, fmt.Errorf("%w: %s", errSubPath, path)
+		}
 		vehicle = resource.NewHTTPVehicle(schema.URL, path)
 	default:
 		return nil, fmt.Errorf("%w: %s", errVehicleType, schema.Type)
