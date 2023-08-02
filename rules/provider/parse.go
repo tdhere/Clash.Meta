@@ -1,12 +1,18 @@
 package provider
 
 import (
+	"errors"
 	"fmt"
+	"time"
+
 	"github.com/Dreamacro/clash/common/structure"
 	"github.com/Dreamacro/clash/component/resource"
 	C "github.com/Dreamacro/clash/constant"
 	P "github.com/Dreamacro/clash/constant/provider"
-	"time"
+)
+
+var (
+	errSubPath = errors.New("path is not subpath of home directory")
 )
 
 type ruleProviderSchema struct {

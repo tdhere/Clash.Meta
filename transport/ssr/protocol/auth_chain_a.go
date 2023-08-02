@@ -8,13 +8,15 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
+	"net"
+	"strconv"
+	"strings"
+
+	N "github.com/Dreamacro/clash/common/net"
 	"github.com/Dreamacro/clash/common/pool"
 	"github.com/Dreamacro/clash/log"
 	"github.com/Dreamacro/clash/transport/shadowsocks/core"
 	"github.com/Dreamacro/clash/transport/ssr/tools"
-	"net"
-	"strconv"
-	"strings"
 )
 
 func init() {
@@ -83,13 +85,13 @@ func (a *authChainA) StreamConn(c net.Conn, iv []byte) net.Conn {
 	return &Conn{Conn: c, Protocol: p}
 }
 
-func (a *authChainA) PacketConn(c net.PacketConn) net.PacketConn {
+func (a *authChainA) PacketConn(c N.EnhancePacketConn) N.EnhancePacketConn {
 	p := &authChainA{
 		Base:     a.Base,
 		salt:     a.salt,
 		userData: a.userData,
 	}
-	return &PacketConn{PacketConn: c, Protocol: p}
+	return &PacketConn{EnhancePacketConn: c, Protocol: p}
 }
 
 func (a *authChainA) Decode(dst, src *bytes.Buffer) error {

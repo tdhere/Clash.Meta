@@ -1,6 +1,8 @@
 package constant
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"os"
 	P "path"
 	"path/filepath"
@@ -20,7 +22,6 @@ var Path = func() *path {
 	if err != nil {
 		homeDir, _ = os.Getwd()
 	}
-
 	homeDir = P.Join(homeDir, ".config", Name)
 	return &path{homeDir: homeDir, configFile: "config.yaml"}
 }()
@@ -56,6 +57,24 @@ func (p *path) Resolve(path string) string {
 	return path
 }
 
+// IsSubPath return true if path is a subpath of homedir
+func (p *path) IsSubPath(path string) bool {
+	homedir := p.HomeDir()
+	path = p.Resolve(path)
+	rel, err := filepath.Rel(homedir, path)
+	if err != nil {
+		return false
+	}
+
+	return !strings.Contains(rel, "..")
+}
+
+func (p *path) GetPathByHash(prefix, name string) string {
+	hash := md5.Sum([]byte(name))
+	filename := hex.EncodeToString(hash[:])
+	return filepath.Join(p.HomeDir(), prefix, filename)
+}
+
 func (p *path) MMDB() string {
 	files, err := os.ReadDir(p.homeDir)
 	if err != nil {
@@ -66,7 +85,8 @@ func (p *path) MMDB() string {
 			// 目录则直接跳过
 			continue
 		} else {
-			if strings.EqualFold(fi.Name(), "Country.mmdb") {
+			if strings.EqualFold(fi.Name(), "Country.mmdb") ||
+				strings.EqualFold(fi.Name(), "geoip.db") {
 				GeoipName = fi.Name()
 				return P.Join(p.homeDir, fi.Name())
 			}

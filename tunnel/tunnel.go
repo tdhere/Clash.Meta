@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"sync"
 	"time"
 
@@ -304,8 +305,11 @@ func handleUDPConn(packet C.PacketAdapter) {
 	key := packet.LocalAddr().String()
 
 	handle := func() bool {
-		pc := natTable.Get(key)
+		pc, proxy := natTable.Get(key)
 		if pc != nil {
+			if proxy != nil {
+				proxy.UpdateWriteBack(packet)
+			}
 			_ = handleUDPToRemote(packet, pc, metadata)
 			return true
 		}
@@ -384,10 +388,11 @@ func handleUDPConn(packet C.PacketAdapter) {
 			log.Infoln("[UDP] %s --> %s doesn't match any rule using DIRECT", metadata.SourceDetail(), metadata.RemoteAddress())
 		}
 
-		oAddr := metadata.DstIP
-		natTable.Set(key, pc)
+		oAddrPort := metadata.AddrPort()
+		writeBackProxy := nat.NewWriteBackProxy(packet)
+		natTable.Set(key, pc, writeBackProxy)
 
-		go handleUDPToLocal(packet, pc, key, oAddr, fAddr)
+		go handleUDPToLocal(writeBackProxy, pc, key, oAddrPort, fAddr)
 
 		handle()
 	}()
@@ -536,8 +541,8 @@ func match(metadata *C.Metadata) (C.Proxy, C.Rule, error) {
 	configMux.RLock()
 	defer configMux.RUnlock()
 	var (
-		resolved     bool
-		processFound bool
+		resolved             bool
+		attemptProcessLookup = true
 	)
 
 	if node, ok := resolver.DefaultHosts.Search(metadata.Host, false); ok {
@@ -561,14 +566,16 @@ func match(metadata *C.Metadata) (C.Proxy, C.Rule, error) {
 			}()
 		}
 
-		if !findProcessMode.Off() && !processFound && (findProcessMode.Always() || rule.ShouldFindProcess()) {
-			processFound = true
-			path, err := P.FindPackageName(metadata)
+		if attemptProcessLookup && !findProcessMode.Off() && (findProcessMode.Always() || rule.ShouldFindProcess()) {
+			attemptProcessLookup = false
+			srcPort, _ := strconv.ParseUint(metadata.SrcPort, 10, 16)
+			uid, path, err := P.FindProcessName(metadata.NetWork.String(), metadata.SrcIP, int(srcPort))
 			if err != nil {
 				log.Debugln("[Process] find process %s: %v", metadata.String(), err)
 			} else {
 				metadata.Process = filepath.Base(path)
 				metadata.ProcessPath = path
+				metadata.Uid = uid
 				if procesCache != metadata.Process {
 					log.Debugln("[Process] %s from process %s", metadata.String(), path)
 				}

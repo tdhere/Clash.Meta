@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -224,43 +223,45 @@ type RawTun struct {
 }
 
 type RawTuicServer struct {
-	Enable                bool     `yaml:"enable" json:"enable"`
-	Listen                string   `yaml:"listen" json:"listen"`
-	Token                 []string `yaml:"token" json:"token"`
-	Certificate           string   `yaml:"certificate" json:"certificate"`
-	PrivateKey            string   `yaml:"private-key" json:"private-key"`
-	CongestionController  string   `yaml:"congestion-controller" json:"congestion-controller,omitempty"`
-	MaxIdleTime           int      `yaml:"max-idle-time" json:"max-idle-time,omitempty"`
-	AuthenticationTimeout int      `yaml:"authentication-timeout" json:"authentication-timeout,omitempty"`
-	ALPN                  []string `yaml:"alpn" json:"alpn,omitempty"`
-	MaxUdpRelayPacketSize int      `yaml:"max-udp-relay-packet-size" json:"max-udp-relay-packet-size,omitempty"`
+	Enable                bool              `yaml:"enable" json:"enable"`
+	Listen                string            `yaml:"listen" json:"listen"`
+	Token                 []string          `yaml:"token" json:"token"`
+	Users                 map[string]string `yaml:"users" json:"users,omitempty"`
+	Certificate           string            `yaml:"certificate" json:"certificate"`
+	PrivateKey            string            `yaml:"private-key" json:"private-key"`
+	CongestionController  string            `yaml:"congestion-controller" json:"congestion-controller,omitempty"`
+	MaxIdleTime           int               `yaml:"max-idle-time" json:"max-idle-time,omitempty"`
+	AuthenticationTimeout int               `yaml:"authentication-timeout" json:"authentication-timeout,omitempty"`
+	ALPN                  []string          `yaml:"alpn" json:"alpn,omitempty"`
+	MaxUdpRelayPacketSize int               `yaml:"max-udp-relay-packet-size" json:"max-udp-relay-packet-size,omitempty"`
+	CWND                  int               `yaml:"cwnd" json:"cwnd,omitempty"`
 }
 
 type RawConfig struct {
-	Port                  int          `yaml:"port" json:"port"`
-	SocksPort             int          `yaml:"socks-port" json:"socks-port"`
-	RedirPort             int          `yaml:"redir-port" json:"redir-port"`
-	TProxyPort            int          `yaml:"tproxy-port" json:"tproxy-port"`
-	MixedPort             int          `yaml:"mixed-port" json:"mixed-port"`
-	Authentication        []string     `yaml:"authentication" json:"authentication"`
-	AllowLan              bool         `yaml:"allow-lan" json:"allow-lan"`
-	BindAddress           string       `yaml:"bind-address" json:"bind-address"`
-	Mode                  T.TunnelMode `yaml:"mode" json:"mode"`
-	UnifiedDelay          bool         `yaml:"unified-delay" json:"unified-delay"`
-	LogLevel              log.LogLevel `yaml:"log-level" json:"log-level"`
-	IPv6                  bool         `yaml:"ipv6" json:"ipv6"`
-	ExternalController    string       `yaml:"external-controller" json:"external-controller"`
-	ExternalControllerTLS string       `yaml:"external-controller-tls" json:"external-controller-tls"`
-	ExternalUI            string       `yaml:"external-ui" json:"external-ui"`
-	Secret                string       `yaml:"secret" json:"secret"`
-	Interface             string       `yaml:"interface-name" json:"interface-name"`
-	RoutingMark           int          `yaml:"routing-mark" json:"routing-mark"`
-	Tunnels               []LC.Tunnel  `yaml:"tunnels" json:"tunnels"`
-	GeodataMode           bool         `yaml:"geodata-mode" json:"geodata-mode"`
-	GeodataLoader         string       `yaml:"geodata-loader" json:"geodata-loader"`
-	TCPConcurrent         bool         `yaml:"tcp-concurrent" json:"tcp-concurrent"`
-	EnableProcess         bool         `yaml:"enable-process" json:"enable-process"`
-	FindProcessMode       P.FindProcessMode `yaml:"find-process-mode" json:"find-process-mode"`
+	Port                    int               `yaml:"port" json:"port"`
+	SocksPort               int               `yaml:"socks-port" json:"socks-port"`
+	RedirPort               int               `yaml:"redir-port" json:"redir-port"`
+	TProxyPort              int               `yaml:"tproxy-port" json:"tproxy-port"`
+	MixedPort               int               `yaml:"mixed-port" json:"mixed-port"`
+	Authentication          []string          `yaml:"authentication" json:"authentication"`
+	AllowLan                bool              `yaml:"allow-lan" json:"allow-lan"`
+	BindAddress             string            `yaml:"bind-address" json:"bind-address"`
+	Mode                    T.TunnelMode      `yaml:"mode" json:"mode"`
+	UnifiedDelay            bool              `yaml:"unified-delay" json:"unified-delay"`
+	LogLevel                log.LogLevel      `yaml:"log-level" json:"log-level"`
+	IPv6                    bool              `yaml:"ipv6" json:"ipv6"`
+	ExternalController      string            `yaml:"external-controller" json:"external-controller"`
+	ExternalControllerTLS   string            `yaml:"external-controller-tls" json:"external-controller-tls"`
+	ExternalUI              string            `yaml:"external-ui" json:"external-ui"`
+	Secret                  string            `yaml:"secret" json:"secret"`
+	Interface               string            `yaml:"interface-name" json:"interface-name"`
+	RoutingMark             int               `yaml:"routing-mark" json:"routing-mark"`
+	Tunnels                 []LC.Tunnel       `yaml:"tunnels" json:"tunnels"`
+	GeodataMode             bool              `yaml:"geodata-mode" json:"geodata-mode"`
+	GeodataLoader           string            `yaml:"geodata-loader" json:"geodata-loader"`
+	TCPConcurrent           bool              `yaml:"tcp-concurrent" json:"tcp-concurrent"`
+	EnableProcess           bool              `yaml:"enable-process" json:"enable-process"`
+	FindProcessMode         P.FindProcessMode `yaml:"find-process-mode" json:"find-process-mode"`
 	GlobalClientFingerprint string            `yaml:"global-client-fingerprint"`
 
 	Sniffer       RawSniffer                `yaml:"sniffer" json:"sniffer"`
@@ -329,20 +330,20 @@ func Parse(buf []byte) (*Config, error) {
 func UnmarshalRawConfig(buf []byte) (*RawConfig, error) {
 	// config with default value
 	rawCfg := &RawConfig{
-		AllowLan:       false,
-		BindAddress:    "*",
-		IPv6:           true,
-		Mode:           T.Rule,
-		GeodataMode:    C.GeodataMode,
-		GeodataLoader:  "memconservative",
-		UnifiedDelay:   false,
-		Authentication: []string{},
-		LogLevel:       log.INFO,
-		Hosts:          map[string]any{},
-		Rule:           []string{},
-		Proxy:          []map[string]any{},
-		ProxyGroup:     []map[string]any{},
-		TCPConcurrent:  false,
+		AllowLan:        false,
+		BindAddress:     "*",
+		IPv6:            true,
+		Mode:            T.Rule,
+		GeodataMode:     C.GeodataMode,
+		GeodataLoader:   "memconservative",
+		UnifiedDelay:    false,
+		Authentication:  []string{},
+		LogLevel:        log.INFO,
+		Hosts:           map[string]any{},
+		Rule:            []string{},
+		Proxy:           []map[string]any{},
+		ProxyGroup:      []map[string]any{},
+		TCPConcurrent:   false,
 		FindProcessMode: P.FindProcessStrict,
 		DNS: RawDNS{
 			Enable:       false,
@@ -512,16 +513,16 @@ func parseGeneral(cfg *RawConfig) (*General, error) {
 			Secret:                cfg.Secret,
 			ExternalControllerTLS: cfg.ExternalControllerTLS,
 		},
-		UnifiedDelay:  cfg.UnifiedDelay,
-		Mode:          cfg.Mode,
-		LogLevel:      cfg.LogLevel,
-		IPv6:          cfg.IPv6,
-		Interface:     cfg.Interface,
-		RoutingMark:   cfg.RoutingMark,
-		GeodataMode:   cfg.GeodataMode,
-		GeodataLoader: cfg.GeodataLoader,
-		TCPConcurrent: cfg.TCPConcurrent,
-		FindProcessMode: cfg.FindProcessMode,
+		UnifiedDelay:            cfg.UnifiedDelay,
+		Mode:                    cfg.Mode,
+		LogLevel:                cfg.LogLevel,
+		IPv6:                    cfg.IPv6,
+		Interface:               cfg.Interface,
+		RoutingMark:             cfg.RoutingMark,
+		GeodataMode:             cfg.GeodataMode,
+		GeodataLoader:           cfg.GeodataLoader,
+		TCPConcurrent:           cfg.TCPConcurrent,
+		FindProcessMode:         cfg.FindProcessMode,
 		GlobalClientFingerprint: cfg.GlobalClientFingerprint,
 	}, nil
 }
@@ -609,7 +610,7 @@ func parseProxies(cfg *RawConfig) (proxies map[string]C.Proxy, providersMap map[
 		}
 		ps = append(ps, proxies[v])
 	}
-	hc := provider.NewHealthCheck(ps, "", 0, true)
+	hc := provider.NewHealthCheck(ps, "", 0, true, nil)
 	pd, _ := provider.NewCompatibleProvider(provider.ReservedName, ps, hc)
 	providersMap[provider.ReservedName] = pd
 
@@ -868,7 +869,7 @@ func parseNameServer(servers []string, preferH3 bool) ([]dns.NameServer, error) 
 			addr, err = hostWithDefaultPort(u.Host, "443")
 			if err == nil {
 				proxyName = ""
-				clearURL := url.URL{Scheme: "https", Host: addr, Path: u.Path}
+				clearURL := url.URL{Scheme: "https", Host: addr, Path: u.Path, User: u.User}
 				addr = clearURL.String()
 				dnsNetType = "https" // DNS over HTTPS
 				if len(u.Fragment) != 0 {
@@ -894,6 +895,19 @@ func parseNameServer(servers []string, preferH3 bool) ([]dns.NameServer, error) 
 			dnsNetType = "quic" // DNS over QUIC
 		case "system":
 			dnsNetType = "system" // System DNS
+		case "rcode":
+			dnsNetType = "rcode"
+			addr = u.Host
+			switch addr {
+			case "success",
+				"format_error",
+				"server_failure",
+				"name_error",
+				"not_implemented",
+				"refused":
+			default:
+				err = fmt.Errorf("unsupported RCode type: %s", addr)
+			}
 		default:
 			return nil, fmt.Errorf("DNS NameServer[%d] unsupport scheme: %s", idx, u.Scheme)
 		}
@@ -1236,6 +1250,7 @@ func parseTuicServer(rawTuic RawTuicServer, general *General) error {
 		Enable:                rawTuic.Enable,
 		Listen:                rawTuic.Listen,
 		Token:                 rawTuic.Token,
+		Users:                 rawTuic.Users,
 		Certificate:           rawTuic.Certificate,
 		PrivateKey:            rawTuic.PrivateKey,
 		CongestionController:  rawTuic.CongestionController,
@@ -1243,6 +1258,7 @@ func parseTuicServer(rawTuic RawTuicServer, general *General) error {
 		AuthenticationTimeout: rawTuic.AuthenticationTimeout,
 		ALPN:                  rawTuic.ALPN,
 		MaxUdpRelayPacketSize: rawTuic.MaxUdpRelayPacketSize,
+		CWND:                  rawTuic.CWND,
 	}
 	return nil
 }
@@ -1258,7 +1274,7 @@ func parseSniffer(snifferRaw RawSniffer) (*Sniffer, error) {
 	if len(snifferRaw.Sniff) != 0 {
 		for sniffType, sniffConfig := range snifferRaw.Sniff {
 			find := false
-			ports, err := parsePortRange(sniffConfig.Ports)
+			ports, err := utils.NewIntRangesFromList[uint16](sniffConfig.Ports)
 			if err != nil {
 				return nil, err
 			}
@@ -1285,7 +1301,7 @@ func parseSniffer(snifferRaw RawSniffer) (*Sniffer, error) {
 			// Deprecated: Use Sniff instead
 			log.Warnln("Deprecated: Use Sniff instead")
 		}
-		globalPorts, err := parsePortRange(snifferRaw.Ports)
+		globalPorts, err := utils.NewIntRangesFromList[uint16](snifferRaw.Ports)
 		if err != nil {
 			return nil, err
 		}
@@ -1329,29 +1345,4 @@ func parseSniffer(snifferRaw RawSniffer) (*Sniffer, error) {
 	sniffer.SkipDomain = skipDomainTrie.NewDomainSet()
 
 	return sniffer, nil
-}
-
-func parsePortRange(portRanges []string) ([]utils.Range[uint16], error) {
-	ports := make([]utils.Range[uint16], 0)
-	for _, portRange := range portRanges {
-		portRaws := strings.Split(portRange, "-")
-		p, err := strconv.ParseUint(portRaws[0], 10, 16)
-		if err != nil {
-			return nil, fmt.Errorf("%s format error", portRange)
-		}
-
-		start := uint16(p)
-		if len(portRaws) > 1 {
-			p, err = strconv.ParseUint(portRaws[1], 10, 16)
-			if err != nil {
-				return nil, fmt.Errorf("%s format error", portRange)
-			}
-
-			end := uint16(p)
-			ports = append(ports, *utils.NewRange(start, end))
-		} else {
-			ports = append(ports, *utils.NewRange(start, start))
-		}
-	}
-	return ports, nil
 }
