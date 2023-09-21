@@ -25,8 +25,6 @@ func (m *Mitm) DialContext(ctx context.Context, metadata *C.Metadata, _ ...diale
 	_ = c.SetKeepAlive(true)
 	_ = c.SetKeepAlivePeriod(60 * time.Second)
 
-	metadata.Type = C.MITM
-
 	hc, err := m.httpProxyClient.StreamConnContext(ctx, c, metadata)
 	if err != nil {
 		_ = c.Close()
