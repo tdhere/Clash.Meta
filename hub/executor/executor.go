@@ -183,12 +183,15 @@ func updateListeners(general *config.General, listeners map[string]C.InboundList
 }
 
 func updateExperimental(c *config.Config) {
+	if c.Experimental.QUICGoDisableGSO {
+		_ = os.Setenv("QUIC_GO_DISABLE_GSO", "1")
+	}
 }
 
 func updateNTP(c *config.NTP) {
 	if c.Enable {
 		ntp.ReCreateNTPService(net.JoinHostPort(c.Server, strconv.Itoa(c.Port)),
-			time.Duration(c.Interval))
+			time.Duration(c.Interval), c.WriteToSystem)
 	}
 }
 

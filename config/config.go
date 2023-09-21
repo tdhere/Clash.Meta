@@ -8,6 +8,8 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -61,7 +63,7 @@ type General struct {
 	Sniffing                bool              `json:"sniffing"`
 	EBpf                    EBpf              `json:"-"`
 	GlobalClientFingerprint string            `json:"global-client-fingerprint"`
-	KeepAliveInterval       int               `json:"keep-alive-interval"`
+	GlobalUA                string            `json:"global-ua"`
 }
 
 // Inbound config
@@ -93,10 +95,11 @@ type Controller struct {
 
 // NTP config
 type NTP struct {
-	Enable   bool   `yaml:"enable"`
-	Server   string `yaml:"server"`
-	Port     int    `yaml:"port"`
-	Interval int    `yaml:"interval"`
+	Enable        bool   `yaml:"enable"`
+	WriteToSystem bool   `yaml:"write-to-system"`
+	Server        string `yaml:"server"`
+	Port          int    `yaml:"port"`
+	Interval      int    `yaml:"interval"`
 }
 
 // DNS config
@@ -162,7 +165,8 @@ type Mitm struct {
 
 // Experimental config
 type Experimental struct {
-	Fingerprints []string `yaml:"fingerprints"`
+	Fingerprints     []string `yaml:"fingerprints"`
+	QUICGoDisableGSO bool     `yaml:"quic-go-disable-gso"`
 }
 
 // Config is clash config manager
@@ -188,10 +192,11 @@ type Config struct {
 }
 
 type RawNTP struct {
-	Enable     bool   `yaml:"enable"`
-	Server     string `yaml:"server"`
-	ServerPort int    `yaml:"server-port"`
-	Interval   int    `yaml:"interval"`
+	Enable        bool   `yaml:"enable"`
+	WriteToSystem bool   `yaml:"write-to-system"`
+	Server        string `yaml:"server"`
+	ServerPort    int    `yaml:"server-port"`
+	Interval      int    `yaml:"interval"`
 }
 
 type RawDNS struct {
@@ -288,6 +293,8 @@ type RawConfig struct {
 	ExternalController      string            `yaml:"external-controller"`
 	ExternalControllerTLS   string            `yaml:"external-controller-tls"`
 	ExternalUI              string            `yaml:"external-ui"`
+	ExternalUIURL           string            `yaml:"external-ui-url" json:"external-ui-url"`
+	ExternalUIName          string            `yaml:"external-ui-name" json:"external-ui-name"`
 	Secret                  string            `yaml:"secret"`
 	Interface               string            `yaml:"interface-name"`
 	RoutingMark             int               `yaml:"routing-mark"`
@@ -297,6 +304,7 @@ type RawConfig struct {
 	TCPConcurrent           bool              `yaml:"tcp-concurrent" json:"tcp-concurrent"`
 	FindProcessMode         P.FindProcessMode `yaml:"find-process-mode" json:"find-process-mode"`
 	GlobalClientFingerprint string            `yaml:"global-client-fingerprint"`
+	GlobalUA                string            `yaml:"global-ua"`
 	KeepAliveInterval       int               `yaml:"keep-alive-interval"`
 
 	Sniffer       RawSniffer                `yaml:"sniffer"`
@@ -384,6 +392,7 @@ func UnmarshalRawConfig(buf []byte) (*RawConfig, error) {
 		ProxyGroup:      []map[string]any{},
 		TCPConcurrent:   false,
 		FindProcessMode: P.FindProcessStrict,
+		GlobalUA:        "clash.meta",
 		Tun: RawTun{
 			Enable:              false,
 			Device:              "",
@@ -414,6 +423,13 @@ func UnmarshalRawConfig(buf []byte) (*RawConfig, error) {
 			Enable:           false,
 			InboundInterface: "lo",
 			Bypass:           []string{},
+		},
+		NTP: RawNTP{
+			Enable:        false,
+			WriteToSystem: false,
+			Server:        "time.apple.com",
+			ServerPort:    123,
+			Interval:      30,
 		},
 		DNS: RawDNS{
 			Enable:       false,
@@ -582,24 +598,46 @@ func ParseRawConfig(rawCfg *RawConfig) (*Config, error) {
 }
 
 func parseGeneral(cfg *RawConfig) (*General, error) {
-	externalUI := cfg.ExternalUI
 	geodata.SetLoader(cfg.GeodataLoader)
 	C.GeoIpUrl = cfg.GeoXUrl.GeoIp
 	C.GeoSiteUrl = cfg.GeoXUrl.GeoSite
 	C.MmdbUrl = cfg.GeoXUrl.Mmdb
 	C.GeodataMode = cfg.GeodataMode
-	if cfg.KeepAliveInterval == 0 {
-		cfg.KeepAliveInterval = 30
+	C.UA = cfg.GlobalUA
+	if cfg.KeepAliveInterval != 0 {
+		N.KeepAliveInterval = time.Duration(cfg.KeepAliveInterval) * time.Second
 	}
-	N.KeepAliveInterval = time.Duration(cfg.KeepAliveInterval) * time.Second
-	log.Infoln("Keep Alive Interval set %+v", N.KeepAliveInterval)
+
+	if cfg.ExternalUIURL != "" {
+		ExternalUIURL = cfg.ExternalUIURL
+	}
+	ExternalUIPath = cfg.ExternalUI
 	// checkout externalUI exist
-	if externalUI != "" {
-		externalUI = C.Path.Resolve(externalUI)
-		if _, err := os.Stat(externalUI); os.IsNotExist(err) {
-			return nil, fmt.Errorf("external-ui: %s not exist", externalUI)
+	if ExternalUIPath != "" {
+		ExternalUIPath = C.Path.Resolve(ExternalUIPath)
+		if _, err := os.Stat(ExternalUIPath); os.IsNotExist(err) {
+			defaultUIpath := path.Join(C.Path.HomeDir(), "ui")
+			log.Warnln("external-ui: %s does not exist, creating folder in %s", ExternalUIPath, defaultUIpath)
+			if err := os.MkdirAll(defaultUIpath, os.ModePerm); err != nil {
+				return nil, err
+			}
+			ExternalUIPath = defaultUIpath
+			cfg.ExternalUI = defaultUIpath
 		}
 	}
+	// checkout UIpath/name exist
+	if cfg.ExternalUIName != "" {
+		ExternalUIName = cfg.ExternalUIName
+		ExternalUIFolder = filepath.Clean(path.Join(ExternalUIPath, cfg.ExternalUIName))
+		if _, err := os.Stat(ExternalUIPath); os.IsNotExist(err) {
+			if err := os.MkdirAll(ExternalUIPath, os.ModePerm); err != nil {
+				return nil, err
+			}
+		}
+	} else {
+		ExternalUIFolder = ExternalUIPath
+	}
+
 	cfg.Tun.RedirectToTun = cfg.EBpf.RedirectToTun
 	return &General{
 		Inbound: Inbound{
@@ -635,7 +673,7 @@ func parseGeneral(cfg *RawConfig) (*General, error) {
 		FindProcessMode:         cfg.FindProcessMode,
 		EBpf:                    cfg.EBpf,
 		GlobalClientFingerprint: cfg.GlobalClientFingerprint,
-		KeepAliveInterval:       cfg.KeepAliveInterval,
+		GlobalUA:                cfg.GlobalUA,
 	}, nil
 }
 
@@ -1202,24 +1240,13 @@ func parseFallbackGeoSite(countries []string, rules []C.Rule) ([]*router.DomainM
 }
 
 func paresNTP(rawCfg *RawConfig) *NTP {
-	var server = "time.apple.com"
-	var port = 123
-	var interval = 30
 	cfg := rawCfg.NTP
-	if len(cfg.Server) != 0 {
-		server = cfg.Server
-	}
-	if cfg.ServerPort != 0 {
-		port = cfg.ServerPort
-	}
-	if cfg.Interval != 0 {
-		interval = cfg.Interval
-	}
 	ntpCfg := &NTP{
-		Enable:   cfg.Enable,
-		Server:   server,
-		Port:     port,
-		Interval: interval,
+		Enable:        cfg.Enable,
+		Server:        cfg.Server,
+		Port:          cfg.ServerPort,
+		Interval:      cfg.Interval,
+		WriteToSystem: cfg.WriteToSystem,
 	}
 	return ntpCfg
 }
