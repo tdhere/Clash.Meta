@@ -8,6 +8,11 @@ mixed-port: 10801 # HTTP(S) 和 SOCKS 代理混合端口
 
 allow-lan: true # 允许局域网连接
 bind-address: "*" # 绑定 IP 地址，仅作用于 allow-lan 为 true，'*'表示所有地址
+authentication: # http,socks入口的验证用户名，密码
+  - "username:password"
+skip-auth-prefixes: # 设置跳过验证的IP段
+  - 127.0.0.1/8
+  - ::1/128
 
 #  find-process-mode has 3 values:always, strict, off
 #  - always, 开启，强制匹配所有进程
@@ -936,6 +941,10 @@ listeners:
       - username: 1
         uuid: 9d0cb9d0-964f-4ef6-897d-6c6b3ccf9e68
         alterId: 1
+    # ws-path: "/" # 如果不为空则开启websocket传输层
+    # 下面两项如果填写则开启tls（需要同时填写）
+    # certificate: ./server.crt
+    # private-key: ./server.key
 
   - name: tuic-in-1
     type: tuic

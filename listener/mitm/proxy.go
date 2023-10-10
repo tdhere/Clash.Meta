@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -21,7 +22,7 @@ import (
 	H "github.com/Dreamacro/clash/listener/http"
 )
 
-func HandleConn(c net.Conn, opt *Option, in chan<- C.ConnContext, cache *cache.LruCache[string, bool]) {
+func HandleConn(c net.Conn, opt *Option, tunnel C.Tunnel, cache *cache.LruCache[string, bool]) {
 	var (
 		clientIP   = netip.MustParseAddrPort(c.RemoteAddr().String()).Addr()
 		sourceAddr net.Addr
@@ -120,7 +121,7 @@ readLoop:
 
 				buf, err2 := conn.Peek(7)
 				if err2 != nil {
-					if err2 != bufio.ErrBufferFull && !os.IsTimeout(err2) {
+					if !errors.Is(err2, bufio.ErrBufferFull) && !os.IsTimeout(err2) {
 						handleError(opt, session, err2)
 						break // close connection
 					}
@@ -132,7 +133,7 @@ readLoop:
 						session.request.TLS = connState
 					}
 
-					serverConn, err = getServerConn(serverConn, session.request, sourceAddr, in)
+					serverConn, err = getServerConn(serverConn, session.request, sourceAddr, tunnel)
 					if err != nil {
 						break
 					}
@@ -160,13 +161,13 @@ readLoop:
 
 			// forward websocket
 			if isWebsocketRequest(request) {
-				serverConn, err = getServerConn(serverConn, session.request, sourceAddr, in)
+				serverConn, err = getServerConn(serverConn, session.request, sourceAddr, tunnel)
 				if err != nil {
 					break
 				}
 
 				session.request.RequestURI = ""
-				if session.response = H.HandleUpgradeY(conn, serverConn, request, in); session.response == nil {
+				if session.response = H.HandleUpgradeY(conn, serverConn, request, tunnel); session.response == nil {
 					return // hijack connection
 				}
 			}
@@ -195,7 +196,7 @@ readLoop:
 				if session.request.URL.Host == "" {
 					session.response = session.NewErrorResponse(ErrInvalidURL)
 				} else {
-					serverConn, err = getServerConn(serverConn, session.request, sourceAddr, in)
+					serverConn, err = getServerConn(serverConn, session.request, sourceAddr, tunnel)
 					if err != nil {
 						break
 					}

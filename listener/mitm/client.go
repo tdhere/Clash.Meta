@@ -12,7 +12,7 @@ import (
 	"github.com/Dreamacro/clash/transport/socks5"
 )
 
-func getServerConn(serverConn *N.BufferedConn, request *http.Request, srcAddr net.Addr, in chan<- C.ConnContext) (*N.BufferedConn, error) {
+func getServerConn(serverConn *N.BufferedConn, request *http.Request, srcAddr net.Addr, tunnel C.Tunnel) (*N.BufferedConn, error) {
 	if serverConn != nil {
 		return serverConn, nil
 	}
@@ -33,7 +33,7 @@ func getServerConn(serverConn *N.BufferedConn, request *http.Request, srcAddr ne
 
 	left, right := net.Pipe()
 
-	in <- inbound.NewMitm(dstAddr, srcAddr, request.Header.Get("User-Agent"), right)
+	go tunnel.HandleTCPConn(inbound.NewMitm(dstAddr, srcAddr, request.Header.Get("User-Agent"), right))
 
 	if request.TLS != nil {
 		tlsConn := tls.Client(left, &tls.Config{

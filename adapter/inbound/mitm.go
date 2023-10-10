@@ -14,9 +14,9 @@ func NewMitm(target socks5.Addr, source net.Addr, userAgent string, conn net.Con
 	metadata.NetWork = C.TCP
 	metadata.Type = C.MITM
 	metadata.UserAgent = userAgent
-	if ip, port, err := parseAddr(source); err == nil {
-		metadata.SrcIP = ip
-		metadata.SrcPort = port
+	if addrPort, err := parseAddr(source); err == nil {
+		metadata.SrcIP = addrPort.Addr()
+		metadata.SrcPort = addrPort.Port()
 	}
 	return context.NewConnContext(conn, metadata)
 }

@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
-	log "github.com/sirupsen/logrus"
+	"github.com/Dreamacro/clash/log"
 	"io"
 	"net/http"
 	"net/textproto"
@@ -31,7 +31,7 @@ func (*RewriteHandler) HandleRequest(session *mitm.Session) (*http.Request, *htt
 		return nil, nil
 	}
 
-	log.Infof("[MITM] %s <- request %s", rule.RuleType().String(), request.URL.String())
+	log.Infoln("[MITM] %s <- request %s", rule.RuleType().String(), request.URL.String())
 
 	switch rule.RuleType() {
 	case C.MitmReject:
@@ -115,7 +115,7 @@ func (*RewriteHandler) HandleResponse(session *mitm.Session) *http.Response {
 		return nil
 	}
 
-	log.Infof("[MITM] %s <- response %s", rule.RuleType().String(), request.URL.String())
+	log.Infoln("[MITM] %s <- response %s", rule.RuleType().String(), request.URL.String())
 
 	switch rule.RuleType() {
 	case C.MitmResponseHeader:

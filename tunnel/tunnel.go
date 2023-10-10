@@ -50,6 +50,25 @@ var (
 	fakeIPRange netip.Prefix
 )
 
+type tunnel struct{}
+
+var Tunnel C.Tunnel = tunnel{}
+
+func (t tunnel) HandleTCPConn(connCtx C.ConnContext) {
+	handleTCPConn(connCtx)
+}
+
+func (t tunnel) HandleUDPPacket(packet C.PacketAdapter) {
+	select {
+	case udpQueue <- packet:
+	default:
+	}
+}
+
+func (t tunnel) NatTable() C.NatTable {
+	return natTable
+}
+
 func OnSuspend() {
 	status.Store(Suspend)
 }
@@ -91,11 +110,13 @@ func init() {
 }
 
 // TCPIn return fan-in queue
+// Deprecated: using Tunnel instead
 func TCPIn() chan<- C.ConnContext {
 	return tcpQueue
 }
 
 // UDPIn return fan-in udp queue
+// Deprecated: using Tunnel instead
 func UDPIn() chan<- C.PacketAdapter {
 	return udpQueue
 }
@@ -126,6 +147,20 @@ func UpdateRules(newRules []C.Rule, newSubRule map[string][]C.Rule, rp map[strin
 // Proxies return all proxies
 func Proxies() map[string]C.Proxy {
 	return proxies
+}
+
+func ProxiesWithProviders() map[string]C.Proxy {
+	allProxies := make(map[string]C.Proxy)
+	for name, proxy := range proxies {
+		allProxies[name] = proxy
+	}
+	for _, p := range providers {
+		for _, proxy := range p.Proxies() {
+			name := proxy.Name()
+			allProxies[name] = proxy
+		}
+	}
+	return allProxies
 }
 
 // Providers return all compatible providers
@@ -177,7 +212,7 @@ func SetFindProcessMode(mode P.FindProcessMode) {
 
 func isHandle(t C.Type) bool {
 	status := status.Load()
-	return status == Running || (status == Inner && t == C.INNER)
+	return status == Running || (status == Inner && (t == C.INNER || t == C.MITM))
 }
 
 // Rewrites return all rewrites
@@ -196,10 +231,6 @@ func UpdateRewrites(rules C.RewriteRule) {
 func processUDP() {
 	queue := udpQueue
 	for conn := range queue {
-		if !isHandle(conn.Metadata().Type) {
-			conn.Drop()
-			continue
-		}
 		handleUDPConn(conn)
 	}
 }
@@ -215,10 +246,6 @@ func process() {
 
 	queue := tcpQueue
 	for conn := range queue {
-		if !isHandle(conn.Metadata().Type) {
-			_ = conn.Conn().Close()
-			continue
-		}
 		go handleTCPConn(conn)
 	}
 }
@@ -283,6 +310,11 @@ func resolveMetadata(ctx C.PlainContext, metadata *C.Metadata) (proxy C.Proxy, r
 }
 
 func handleUDPConn(packet C.PacketAdapter) {
+	if !isHandle(packet.Metadata().Type) {
+		packet.Drop()
+		return
+	}
+
 	metadata := packet.Metadata()
 	if !metadata.Valid() {
 		packet.Drop()
@@ -408,6 +440,11 @@ func handleUDPConn(packet C.PacketAdapter) {
 }
 
 func handleTCPConn(connCtx C.ConnContext) {
+	if !isHandle(connCtx.Metadata().Type) {
+		_ = connCtx.Conn().Close()
+		return
+	}
+
 	defer func(conn net.Conn) {
 		_ = conn.Close()
 	}(connCtx.Conn())
@@ -418,15 +455,28 @@ func handleTCPConn(connCtx C.ConnContext) {
 		return
 	}
 
+	preHandleFailed := false
 	if err := preHandleMetadata(metadata); err != nil {
 		log.Debugln("[Metadata PreHandle] error: %s", err)
-		return
+		preHandleFailed = true
 	}
 
 	conn := connCtx.Conn()
 	conn.ResetPeeked() // reset before sniffer
 	if sniffer.Dispatcher.Enable() && sniffingEnable {
-		sniffer.Dispatcher.TCPSniff(conn, metadata)
+		// Try to sniff a domain when `preHandleMetadata` failed, this is usually
+		// caused by a "Fake DNS record missing" error when enhanced-mode is fake-ip.
+		if sniffer.Dispatcher.TCPSniff(conn, metadata) {
+			// we now have a domain name
+			preHandleFailed = false
+		}
+	}
+
+	// If both trials have failed, we can do nothing but give up
+	if preHandleFailed {
+		log.Debugln("[Metadata PreHandle] failed to sniff a domain for connection %s --> %s, give up",
+			metadata.SourceDetail(), metadata.RemoteAddress())
+		return
 	}
 
 	peekMutex := sync.Mutex{}

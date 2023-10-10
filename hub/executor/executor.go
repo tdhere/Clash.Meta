@@ -2,7 +2,6 @@ package executor
 
 import (
 	"fmt"
-	"github.com/Dreamacro/clash/ntp"
 	"net"
 	"net/netip"
 	"os"
@@ -12,10 +11,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Dreamacro/clash/ntp"
+
 	"github.com/Dreamacro/clash/adapter"
 	"github.com/Dreamacro/clash/adapter/inbound"
 	"github.com/Dreamacro/clash/adapter/outboundgroup"
 	"github.com/Dreamacro/clash/component/auth"
+	"github.com/Dreamacro/clash/component/ca"
 	"github.com/Dreamacro/clash/component/dialer"
 	G "github.com/Dreamacro/clash/component/geodata"
 	"github.com/Dreamacro/clash/component/iface"
@@ -23,7 +25,6 @@ import (
 	"github.com/Dreamacro/clash/component/profile/cachefile"
 	"github.com/Dreamacro/clash/component/resolver"
 	SNI "github.com/Dreamacro/clash/component/sniffer"
-	CTLS "github.com/Dreamacro/clash/component/tls"
 	"github.com/Dreamacro/clash/component/trie"
 	"github.com/Dreamacro/clash/config"
 	C "github.com/Dreamacro/clash/constant"
@@ -83,9 +84,9 @@ func ApplyConfig(cfg *config.Config, force bool) {
 
 	tunnel.OnSuspend()
 
-	CTLS.ResetCertificate()
+	ca.ResetCertificate()
 	for _, c := range cfg.TLS.CustomTrustCert {
-		if err := CTLS.AddCertificate(c); err != nil {
+		if err := ca.AddCertificate(c); err != nil {
 			log.Warnln("%s\nadd error: %s", c, err.Error())
 		}
 	}
@@ -118,7 +119,7 @@ func ApplyConfig(cfg *config.Config, force bool) {
 }
 
 func initInnerTcp() {
-	inner.New(tunnel.TCPIn())
+	inner.New(tunnel.Tunnel)
 }
 
 func GetGeneral() *config.General {
@@ -141,9 +142,11 @@ func GetGeneral() *config.General {
 			ShadowSocksConfig: ports.ShadowSocksConfig,
 			VmessConfig:       ports.VmessConfig,
 			Authentication:    authenticator,
+			SkipAuthPrefixes:  inbound.SkipAuthPrefixes(),
 			AllowLan:          listener.AllowLan(),
 			BindAddress:       listener.BindAddress(),
 		},
+		Controller:    config.Controller{},
 		Mode:          tunnel.Mode(),
 		LogLevel:      log.Level(),
 		IPv6:          !resolver.DisableIPv6,
@@ -157,41 +160,45 @@ func GetGeneral() *config.General {
 }
 
 func updateListeners(general *config.General, listeners map[string]C.InboundListener, force bool) {
-	tcpIn := tunnel.TCPIn()
-	udpIn := tunnel.UDPIn()
-	natTable := tunnel.NatTable()
-
-	listener.PatchInboundListeners(listeners, tcpIn, udpIn, natTable, true)
+	listener.PatchInboundListeners(listeners, tunnel.Tunnel, true)
 	if !force {
 		return
 	}
 
 	allowLan := general.AllowLan
 	listener.SetAllowLan(allowLan)
+	inbound.SetSkipAuthPrefixes(general.SkipAuthPrefixes)
 
 	bindAddress := general.BindAddress
 	listener.SetBindAddress(bindAddress)
-	listener.ReCreateHTTP(general.Port, tcpIn)
-	listener.ReCreateSocks(general.SocksPort, tcpIn, udpIn)
-	listener.ReCreateRedir(general.RedirPort, tcpIn, udpIn, natTable)
-	listener.ReCreateAutoRedir(general.EBpf.AutoRedir, tcpIn, udpIn)
-	listener.ReCreateTProxy(general.TProxyPort, tcpIn, udpIn, natTable)
-	listener.ReCreateMixed(general.MixedPort, tcpIn, udpIn)
-	listener.ReCreateShadowSocks(general.ShadowSocksConfig, tcpIn, udpIn)
-	listener.ReCreateVmess(general.VmessConfig, tcpIn, udpIn)
-	listener.ReCreateTuic(LC.TuicServer(general.TuicServer), tcpIn, udpIn)
+	listener.ReCreateHTTP(general.Port, tunnel.Tunnel)
+	listener.ReCreateSocks(general.SocksPort, tunnel.Tunnel)
+	listener.ReCreateRedir(general.RedirPort, tunnel.Tunnel)
+	listener.ReCreateAutoRedir(general.EBpf.AutoRedir, tunnel.Tunnel)
+	listener.ReCreateTProxy(general.TProxyPort, tunnel.Tunnel)
+	listener.ReCreateMixed(general.MixedPort, tunnel.Tunnel)
+	listener.ReCreateShadowSocks(general.ShadowSocksConfig, tunnel.Tunnel)
+	listener.ReCreateVmess(general.VmessConfig, tunnel.Tunnel)
+	listener.ReCreateTuic(general.TuicServer, tunnel.Tunnel)
 }
 
 func updateExperimental(c *config.Config) {
 	if c.Experimental.QUICGoDisableGSO {
-		_ = os.Setenv("QUIC_GO_DISABLE_GSO", "1")
+		_ = os.Setenv("QUIC_GO_DISABLE_GSO", strconv.FormatBool(true))
+	}
+	if c.Experimental.QUICGoDisableECN {
+		_ = os.Setenv("QUIC_GO_DISABLE_ECN", strconv.FormatBool(true))
 	}
 }
 
 func updateNTP(c *config.NTP) {
 	if c.Enable {
-		ntp.ReCreateNTPService(net.JoinHostPort(c.Server, strconv.Itoa(c.Port)),
-			time.Duration(c.Interval), c.WriteToSystem)
+		ntp.ReCreateNTPService(
+			net.JoinHostPort(c.Server, strconv.Itoa(c.Port)),
+			time.Duration(c.Interval),
+			c.DialerProxy,
+			c.WriteToSystem,
+		)
 	}
 }
 
@@ -335,7 +342,7 @@ func updateTun(general *config.General) {
 	if general == nil {
 		return
 	}
-	listener.ReCreateTun(LC.Tun(general.Tun), tunnel.TCPIn(), tunnel.UDPIn())
+	listener.ReCreateTun(general.Tun, tunnel.Tunnel)
 	listener.ReCreateRedirToTun(general.Tun.RedirectToTun)
 }
 
@@ -363,7 +370,7 @@ func updateSniffer(sniffer *config.Sniffer) {
 }
 
 func updateTunnels(tunnels []LC.Tunnel) {
-	listener.PatchTunnel(tunnels, tunnel.TCPIn(), tunnel.UDPIn())
+	listener.PatchTunnel(tunnels, tunnel.Tunnel)
 }
 
 func updateGeneral(general *config.General) {
@@ -496,7 +503,7 @@ func updateIPTables(cfg *config.Config) {
 }
 
 func updateMitm(mitm *config.Mitm) {
-	listener.ReCreateMitm(mitm.Port, tunnel.TCPIn())
+	listener.ReCreateMitm(mitm.Port, tunnel.Tunnel)
 	tunnel.UpdateRewrites(mitm.Rules)
 }
 

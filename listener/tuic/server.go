@@ -31,7 +31,7 @@ type Listener struct {
 	servers      []*tuic.Server
 }
 
-func New(config LC.TuicServer, tcpIn chan<- C.ConnContext, udpIn chan<- C.PacketAdapter, additions ...inbound.Addition) (*Listener, error) {
+func New(config LC.TuicServer, tunnel C.Tunnel, additions ...inbound.Addition) (*Listener, error) {
 	if len(additions) == 0 {
 		additions = []inbound.Addition{
 			inbound.WithInName("DEFAULT-TUIC"),
@@ -39,12 +39,12 @@ func New(config LC.TuicServer, tcpIn chan<- C.ConnContext, udpIn chan<- C.Packet
 		}
 	}
 	h := &sing.ListenerHandler{
-		TcpIn:     tcpIn,
-		UdpIn:     udpIn,
+		Tunnel:    tunnel,
 		Type:      C.TUIC,
 		Additions: additions,
 	}
-	cert, err := CN.ParseCert(config.Certificate, config.PrivateKey)
+
+	cert, err := CN.ParseCert(config.Certificate, config.PrivateKey, C.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +106,7 @@ func New(config LC.TuicServer, tcpIn chan<- C.ConnContext, udpIn chan<- C.Packet
 			}()
 			return nil
 		}
-		tcpIn <- connCtx
+		go tunnel.HandleTCPConn(connCtx)
 		return nil
 	}
 	handleUdpFn := func(addr socks5.Addr, packet C.UDPPacket, _additions ...inbound.Addition) error {
@@ -115,10 +115,7 @@ func New(config LC.TuicServer, tcpIn chan<- C.ConnContext, udpIn chan<- C.Packet
 			newAdditions = slices.Clone(additions)
 			newAdditions = append(newAdditions, _additions...)
 		}
-		select {
-		case udpIn <- inbound.NewPacket(addr, packet, C.TUIC, newAdditions...):
-		default:
-		}
+		tunnel.HandleUDPPacket(inbound.NewPacket(addr, packet, C.TUIC, newAdditions...))
 		return nil
 	}
 

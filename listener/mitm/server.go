@@ -51,11 +51,11 @@ func (l *Listener) Close() error {
 }
 
 // New the MITM proxy actually is a type of HTTP proxy
-func New(option *Option, in chan<- C.ConnContext) (*Listener, error) {
-	return NewWithAuthenticate(option, in, true)
+func New(option *Option, tunnel C.Tunnel) (*Listener, error) {
+	return NewWithAuthenticate(option, tunnel, true)
 }
 
-func NewWithAuthenticate(option *Option, in chan<- C.ConnContext, authenticate bool) (*Listener, error) {
+func NewWithAuthenticate(option *Option, tunnel C.Tunnel, authenticate bool) (*Listener, error) {
 	l, err := net.Listen("tcp", option.Addr)
 	if err != nil {
 		return nil, err
@@ -80,7 +80,7 @@ func NewWithAuthenticate(option *Option, in chan<- C.ConnContext, authenticate b
 				}
 				continue
 			}
-			go HandleConn(conn, option, in, c)
+			go HandleConn(conn, option, tunnel, c)
 		}
 	}()
 

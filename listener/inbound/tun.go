@@ -56,19 +56,19 @@ func NewTun(options *TunOption) (*Tun, error) {
 	if !exist {
 		return nil, errors.New("invalid tun stack")
 	}
-	inet4Address, err := LC.StringSliceToListenPrefixSlice(options.Inet4Address)
+	inet4Address, err := LC.StringSliceToNetipPrefixSlice(options.Inet4Address)
 	if err != nil {
 		return nil, err
 	}
-	inet6Address, err := LC.StringSliceToListenPrefixSlice(options.Inet6Address)
+	inet6Address, err := LC.StringSliceToNetipPrefixSlice(options.Inet6Address)
 	if err != nil {
 		return nil, err
 	}
-	inet4RouteAddress, err := LC.StringSliceToListenPrefixSlice(options.Inet4RouteAddress)
+	inet4RouteAddress, err := LC.StringSliceToNetipPrefixSlice(options.Inet4RouteAddress)
 	if err != nil {
 		return nil, err
 	}
-	inet6RouteAddress, err := LC.StringSliceToListenPrefixSlice(options.Inet6RouteAddress)
+	inet6RouteAddress, err := LC.StringSliceToNetipPrefixSlice(options.Inet6RouteAddress)
 	if err != nil {
 		return nil, err
 	}
@@ -113,9 +113,9 @@ func (t *Tun) Address() string {
 }
 
 // Listen implements constant.InboundListener
-func (t *Tun) Listen(tcpIn chan<- C.ConnContext, udpIn chan<- C.PacketAdapter, natTable C.NatTable) error {
+func (t *Tun) Listen(tunnel C.Tunnel) error {
 	var err error
-	t.l, err = sing_tun.New(t.tun, tcpIn, udpIn, t.Additions()...)
+	t.l, err = sing_tun.New(t.tun, tunnel, t.Additions()...)
 	if err != nil {
 		return err
 	}

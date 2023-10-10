@@ -30,13 +30,13 @@ const (
 
 type extraProxyState struct {
 	history *queue.Queue[C.DelayHistory]
-	alive   *atomic.Bool
+	alive   atomic.Bool
 }
 
 type Proxy struct {
 	C.ProxyAdapter
 	history *queue.Queue[C.DelayHistory]
-	alive   *atomic.Bool
+	alive   atomic.Bool
 	url     string
 	extra   *xsync.MapOf[string, *extraProxyState]
 }
@@ -216,6 +216,10 @@ func (p *Proxy) URLTest(ctx context.Context, url string, expectedStatus utils.In
 			record := C.DelayHistory{Time: time.Now()}
 			if alive {
 				record.Delay = t
+			}
+			p.history.Put(record)
+			if p.history.Len() > defaultHistoriesNum {
+				p.history.Pop()
 			}
 
 			state, ok := p.extra.Load(url)
