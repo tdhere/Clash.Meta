@@ -6,9 +6,9 @@ import (
 	"net/netip"
 	"time"
 
-	N "github.com/Dreamacro/clash/common/net"
-	C "github.com/Dreamacro/clash/constant"
-	"github.com/Dreamacro/clash/log"
+	N "github.com/metacubex/mihomo/common/net"
+	C "github.com/metacubex/mihomo/constant"
+	"github.com/metacubex/mihomo/log"
 )
 
 func handleUDPToRemote(packet C.UDPPacket, pc C.PacketConn, metadata *C.Metadata) error {
@@ -73,12 +73,9 @@ func handleUDPToLocal(writeBack C.WriteBack, pc N.EnhancePacketConn, key string,
 }
 
 func closeAllLocalCoon(lAddr string) {
-	natTable.RangeLocalConn(lAddr, func(key, value any) bool {
-		conn, ok := value.(*net.UDPConn)
-		if !ok || conn == nil {
-			log.Debugln("Value %#v unknown value when closing TProxy local conn...", conn)
-			return true
-		}
+	natTable.RangeForLocalConn(lAddr, func(key string, value *net.UDPConn) bool {
+		conn := value
+
 		conn.Close()
 		log.Debugln("Closing TProxy local conn... lAddr=%s rAddr=%s", lAddr, key)
 		return true

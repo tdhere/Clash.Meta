@@ -2,10 +2,9 @@ package common
 
 import (
 	"fmt"
-	"strconv"
 
-	"github.com/Dreamacro/clash/common/utils"
-	C "github.com/Dreamacro/clash/constant"
+	"github.com/metacubex/mihomo/common/utils"
+	C "github.com/metacubex/mihomo/constant"
 )
 
 type Port struct {
@@ -28,7 +27,7 @@ func (p *Port) Match(metadata *C.Metadata) (bool, string) {
 	case C.SrcPort:
 		targetPort = metadata.SrcPort
 	}
-	return p.matchPortReal(targetPort), p.adapter
+	return p.portRanges.Check(targetPort), p.adapter
 }
 
 func (p *Port) Adapter() string {
@@ -37,12 +36,6 @@ func (p *Port) Adapter() string {
 
 func (p *Port) Payload() string {
 	return p.port
-}
-
-func (p *Port) matchPortReal(portRef string) bool {
-	port, _ := strconv.Atoi(portRef)
-
-	return p.portRanges.Check(uint16(port))
 }
 
 func NewPort(port string, adapter string, ruleType C.RuleType) (*Port, error) {

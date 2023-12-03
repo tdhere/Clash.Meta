@@ -7,12 +7,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Dreamacro/clash/adapter"
-	"github.com/Dreamacro/clash/adapter/outboundgroup"
-	"github.com/Dreamacro/clash/common/utils"
-	"github.com/Dreamacro/clash/component/profile/cachefile"
-	C "github.com/Dreamacro/clash/constant"
-	"github.com/Dreamacro/clash/tunnel"
+	"github.com/metacubex/mihomo/adapter"
+	"github.com/metacubex/mihomo/adapter/outboundgroup"
+	"github.com/metacubex/mihomo/common/utils"
+	"github.com/metacubex/mihomo/component/profile/cachefile"
+	C "github.com/metacubex/mihomo/constant"
+	"github.com/metacubex/mihomo/tunnel"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/render"
@@ -46,7 +46,7 @@ func parseProxyName(next http.Handler) http.Handler {
 func findProxyByName(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := r.Context().Value(CtxKeyProxyName).(string)
-		proxies := tunnel.Proxies()
+		proxies := tunnel.ProxiesWithProviders()
 		proxy, exist := proxies[name]
 		if !exist {
 			render.Status(r, http.StatusNotFound)
@@ -60,7 +60,7 @@ func findProxyByName(next http.Handler) http.Handler {
 }
 
 func getProxies(w http.ResponseWriter, r *http.Request) {
-	proxies := tunnel.Proxies()
+	proxies := tunnel.ProxiesWithProviders()
 	render.JSON(w, r, render.M{
 		"proxies": proxies,
 	})
@@ -125,7 +125,7 @@ func getProxyDelay(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*time.Duration(timeout))
 	defer cancel()
 
-	delay, err := proxy.URLTest(ctx, url, expectedStatus, C.ExtraHistory)
+	delay, err := proxy.URLTest(ctx, url, expectedStatus)
 	if ctx.Err() != nil {
 		render.Status(r, http.StatusGatewayTimeout)
 		render.JSON(w, r, ErrRequestTimeout)

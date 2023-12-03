@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	tlsC "github.com/Dreamacro/clash/component/tls"
-	C "github.com/Dreamacro/clash/constant"
-	"github.com/Dreamacro/clash/log"
+	"github.com/metacubex/mihomo/component/ca"
+	C "github.com/metacubex/mihomo/constant"
+	"github.com/metacubex/mihomo/log"
 	"github.com/metacubex/quic-go"
 
 	D "github.com/miekg/dns"
@@ -132,11 +132,6 @@ func (doq *dnsOverQUIC) ExchangeContext(ctx context.Context, m *D.Msg) (msg *D.M
 	}
 
 	return msg, err
-}
-
-// Exchange implements the Upstream interface for *dnsOverQUIC.
-func (doq *dnsOverQUIC) Exchange(m *D.Msg) (msg *D.Msg, err error) {
-	return doq.ExchangeContext(context.Background(), m)
 }
 
 // Close implements the Upstream interface for *dnsOverQUIC.
@@ -330,7 +325,7 @@ func (doq *dnsOverQUIC) openConnection(ctx context.Context) (conn quic.Connectio
 		return nil, err
 	}
 
-	tlsConfig := tlsC.GetGlobalTLSConfig(
+	tlsConfig := ca.GetGlobalTLSConfig(
 		&tls.Config{
 			ServerName:         host,
 			InsecureSkipVerify: false,

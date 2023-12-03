@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	"github.com/Dreamacro/clash/common/buf"
 	"github.com/gofrs/uuid/v5"
+	"github.com/metacubex/mihomo/common/buf"
 	"github.com/zhangyunhao116/fastrand"
 )
 

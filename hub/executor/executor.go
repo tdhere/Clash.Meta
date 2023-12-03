@@ -2,36 +2,40 @@ package executor
 
 import (
 	"fmt"
+	"net"
 	"net/netip"
 	"os"
 	"runtime"
-	"strings"
+	"strconv"
 	"sync"
+	"time"
 
-	"github.com/Dreamacro/clash/adapter"
-	"github.com/Dreamacro/clash/adapter/inbound"
-	"github.com/Dreamacro/clash/adapter/outboundgroup"
-	"github.com/Dreamacro/clash/component/auth"
-	"github.com/Dreamacro/clash/component/dialer"
-	G "github.com/Dreamacro/clash/component/geodata"
-	"github.com/Dreamacro/clash/component/iface"
-	"github.com/Dreamacro/clash/component/profile"
-	"github.com/Dreamacro/clash/component/profile/cachefile"
-	"github.com/Dreamacro/clash/component/resolver"
-	SNI "github.com/Dreamacro/clash/component/sniffer"
-	CTLS "github.com/Dreamacro/clash/component/tls"
-	"github.com/Dreamacro/clash/component/trie"
-	"github.com/Dreamacro/clash/config"
-	C "github.com/Dreamacro/clash/constant"
-	"github.com/Dreamacro/clash/constant/provider"
-	"github.com/Dreamacro/clash/dns"
-	"github.com/Dreamacro/clash/listener"
-	authStore "github.com/Dreamacro/clash/listener/auth"
-	LC "github.com/Dreamacro/clash/listener/config"
-	"github.com/Dreamacro/clash/listener/inner"
-	"github.com/Dreamacro/clash/listener/tproxy"
-	"github.com/Dreamacro/clash/log"
-	"github.com/Dreamacro/clash/tunnel"
+	"github.com/metacubex/mihomo/adapter"
+	"github.com/metacubex/mihomo/adapter/inbound"
+	"github.com/metacubex/mihomo/adapter/outboundgroup"
+	"github.com/metacubex/mihomo/component/auth"
+	"github.com/metacubex/mihomo/component/ca"
+	"github.com/metacubex/mihomo/component/dialer"
+	G "github.com/metacubex/mihomo/component/geodata"
+	"github.com/metacubex/mihomo/component/iface"
+	"github.com/metacubex/mihomo/component/profile"
+	"github.com/metacubex/mihomo/component/profile/cachefile"
+	"github.com/metacubex/mihomo/component/resolver"
+	SNI "github.com/metacubex/mihomo/component/sniffer"
+	"github.com/metacubex/mihomo/component/trie"
+	"github.com/metacubex/mihomo/config"
+	C "github.com/metacubex/mihomo/constant"
+	"github.com/metacubex/mihomo/constant/features"
+	"github.com/metacubex/mihomo/constant/provider"
+	"github.com/metacubex/mihomo/dns"
+	"github.com/metacubex/mihomo/listener"
+	authStore "github.com/metacubex/mihomo/listener/auth"
+	LC "github.com/metacubex/mihomo/listener/config"
+	"github.com/metacubex/mihomo/listener/inner"
+	"github.com/metacubex/mihomo/listener/tproxy"
+	"github.com/metacubex/mihomo/log"
+	"github.com/metacubex/mihomo/ntp"
+	"github.com/metacubex/mihomo/tunnel"
 )
 
 var mux sync.Mutex
@@ -79,19 +83,21 @@ func ApplyConfig(cfg *config.Config, force bool) {
 
 	tunnel.OnSuspend()
 
-	CTLS.ResetCertificate()
+	ca.ResetCertificate()
 	for _, c := range cfg.TLS.CustomTrustCert {
-		if err := CTLS.AddCertificate(c); err != nil {
+		if err := ca.AddCertificate(c); err != nil {
 			log.Warnln("%s\nadd error: %s", c, err.Error())
 		}
 	}
 
 	updateUsers(cfg.Users)
-	updateProxies(cfg.Proxies, cfg.Providers)
+	updateProxies(cfg.Mitm, cfg.Proxies, cfg.Providers)
 	updateRules(cfg.Rules, cfg.SubRules, cfg.RuleProviders)
 	updateSniffer(cfg.Sniffer)
 	updateHosts(cfg.Hosts)
+	updateMitm(cfg.Mitm)
 	updateGeneral(cfg.General)
+	updateNTP(cfg.NTP)
 	updateDNS(cfg.DNS, cfg.RuleProviders, cfg.General.IPv6)
 	updateListeners(cfg.General, cfg.Listeners, force)
 	updateIPTables(cfg)
@@ -112,7 +118,7 @@ func ApplyConfig(cfg *config.Config, force bool) {
 }
 
 func initInnerTcp() {
-	inner.New(tunnel.TCPIn())
+	inner.New(tunnel.Tunnel)
 }
 
 func GetGeneral() *config.General {
@@ -129,14 +135,17 @@ func GetGeneral() *config.General {
 			RedirPort:         ports.RedirPort,
 			TProxyPort:        ports.TProxyPort,
 			MixedPort:         ports.MixedPort,
+			MitmPort:          ports.MitmPort,
 			Tun:               listener.GetTunConf(),
 			TuicServer:        listener.GetTuicConf(),
 			ShadowSocksConfig: ports.ShadowSocksConfig,
 			VmessConfig:       ports.VmessConfig,
 			Authentication:    authenticator,
+			SkipAuthPrefixes:  inbound.SkipAuthPrefixes(),
 			AllowLan:          listener.AllowLan(),
 			BindAddress:       listener.BindAddress(),
 		},
+		Controller:    config.Controller{},
 		Mode:          tunnel.Mode(),
 		LogLevel:      log.Level(),
 		IPv6:          !resolver.DisableIPv6,
@@ -150,32 +159,48 @@ func GetGeneral() *config.General {
 }
 
 func updateListeners(general *config.General, listeners map[string]C.InboundListener, force bool) {
-	tcpIn := tunnel.TCPIn()
-	udpIn := tunnel.UDPIn()
-	natTable := tunnel.NatTable()
-
-	listener.PatchInboundListeners(listeners, tcpIn, udpIn, natTable, true)
+	listener.PatchInboundListeners(listeners, tunnel.Tunnel, true)
 	if !force {
 		return
 	}
 
 	allowLan := general.AllowLan
 	listener.SetAllowLan(allowLan)
+	inbound.SetSkipAuthPrefixes(general.SkipAuthPrefixes)
 
 	bindAddress := general.BindAddress
 	listener.SetBindAddress(bindAddress)
-	listener.ReCreateHTTP(general.Port, tcpIn)
-	listener.ReCreateSocks(general.SocksPort, tcpIn, udpIn)
-	listener.ReCreateRedir(general.RedirPort, tcpIn, udpIn, natTable)
-	listener.ReCreateAutoRedir(general.EBpf.AutoRedir, tcpIn, udpIn)
-	listener.ReCreateTProxy(general.TProxyPort, tcpIn, udpIn, natTable)
-	listener.ReCreateMixed(general.MixedPort, tcpIn, udpIn)
-	listener.ReCreateShadowSocks(general.ShadowSocksConfig, tcpIn, udpIn)
-	listener.ReCreateVmess(general.VmessConfig, tcpIn, udpIn)
-	listener.ReCreateTuic(LC.TuicServer(general.TuicServer), tcpIn, udpIn)
+	listener.ReCreateHTTP(general.Port, tunnel.Tunnel)
+	listener.ReCreateSocks(general.SocksPort, tunnel.Tunnel)
+	listener.ReCreateRedir(general.RedirPort, tunnel.Tunnel)
+	if !features.CMFA {
+		listener.ReCreateAutoRedir(general.EBpf.AutoRedir, tunnel.Tunnel)
+	}
+	listener.ReCreateTProxy(general.TProxyPort, tunnel.Tunnel)
+	listener.ReCreateMixed(general.MixedPort, tunnel.Tunnel)
+	listener.ReCreateShadowSocks(general.ShadowSocksConfig, tunnel.Tunnel)
+	listener.ReCreateVmess(general.VmessConfig, tunnel.Tunnel)
+	listener.ReCreateTuic(general.TuicServer, tunnel.Tunnel)
 }
 
 func updateExperimental(c *config.Config) {
+	if c.Experimental.QUICGoDisableGSO {
+		_ = os.Setenv("QUIC_GO_DISABLE_GSO", strconv.FormatBool(true))
+	}
+	if c.Experimental.QUICGoDisableECN {
+		_ = os.Setenv("QUIC_GO_DISABLE_ECN", strconv.FormatBool(true))
+	}
+}
+
+func updateNTP(c *config.NTP) {
+	if c.Enable {
+		ntp.ReCreateNTPService(
+			net.JoinHostPort(c.Server, strconv.Itoa(c.Port)),
+			time.Duration(c.Interval),
+			c.DialerProxy,
+			c.WriteToSystem,
+		)
+	}
 }
 
 func updateDNS(c *config.DNS, ruleProvider map[string]provider.RuleProvider, generalIPv6 bool) {
@@ -185,25 +210,6 @@ func updateDNS(c *config.DNS, ruleProvider map[string]provider.RuleProvider, gen
 		resolver.DefaultLocalServer = nil
 		dns.ReCreateServer("", nil, nil)
 		return
-	}
-	policy := make(map[string][]dns.NameServer)
-	domainSetPolicies := make(map[provider.RuleProvider][]dns.NameServer)
-	for key, nameservers := range c.NameServerPolicy {
-		temp := strings.Split(key, ":")
-		if len(temp) == 2 {
-			prefix := temp[0]
-			key := temp[1]
-			switch strings.ToLower(prefix) {
-			case "rule-set":
-				if p, ok := ruleProvider[key]; ok {
-					domainSetPolicies[p] = nameservers
-				}
-			case "geosite":
-				// TODO:
-			}
-		} else {
-			policy[key] = nameservers
-		}
 	}
 	cfg := dns.Config{
 		Main:         c.NameServer,
@@ -220,10 +226,11 @@ func updateDNS(c *config.DNS, ruleProvider map[string]provider.RuleProvider, gen
 			Domain:    c.FallbackFilter.Domain,
 			GeoSite:   c.FallbackFilter.GeoSite,
 		},
-		Default:         c.DefaultNameserver,
-		Policy:          c.NameServerPolicy,
-		ProxyServer:     c.ProxyServerNameserver,
-		DomainSetPolicy: domainSetPolicies,
+		Default:        c.DefaultNameserver,
+		Policy:         c.NameServerPolicy,
+		ProxyServer:    c.ProxyServerNameserver,
+		RuleProviders:  ruleProvider,
+		CacheAlgorithm: c.CacheAlgorithm,
 	}
 
 	r := dns.NewResolver(cfg)
@@ -250,7 +257,7 @@ func updateHosts(tree *trie.DomainTrie[resolver.HostValue]) {
 	resolver.DefaultHosts = resolver.NewHosts(tree)
 }
 
-func updateProxies(proxies map[string]C.Proxy, providers map[string]provider.ProxyProvider) {
+func updateProxies(mitm *config.Mitm, proxies map[string]C.Proxy, providers map[string]provider.ProxyProvider) {
 	tunnel.UpdateProxies(proxies, providers)
 }
 
@@ -308,6 +315,9 @@ func loadProxyProvider(proxyProviders map[string]provider.ProxyProvider) {
 		go func() {
 			defer func() { <-ch; wg.Done() }()
 			loadProvider(proxyProvider)
+			if proxyProvider.VehicleType() == provider.Compatible {
+				go proxyProvider.HealthCheck()
+			}
 		}()
 	}
 
@@ -318,7 +328,7 @@ func updateTun(general *config.General) {
 	if general == nil {
 		return
 	}
-	listener.ReCreateTun(LC.Tun(general.Tun), tunnel.TCPIn(), tunnel.UDPIn())
+	listener.ReCreateTun(general.Tun, tunnel.Tunnel)
 	listener.ReCreateRedirToTun(general.Tun.RedirectToTun)
 }
 
@@ -346,7 +356,7 @@ func updateSniffer(sniffer *config.Sniffer) {
 }
 
 func updateTunnels(tunnels []LC.Tunnel) {
-	listener.PatchTunnel(tunnels, tunnel.TCPIn(), tunnel.UDPIn())
+	listener.PatchTunnel(tunnels, tunnel.Tunnel)
 }
 
 func updateGeneral(general *config.General) {
@@ -360,6 +370,7 @@ func updateGeneral(general *config.General) {
 	}
 
 	inbound.SetTfo(general.InboundTfo)
+	inbound.SetMPTCP(general.InboundMPTCP)
 
 	adapter.UnifiedDelay.Store(general.UnifiedDelay)
 
@@ -477,10 +488,15 @@ func updateIPTables(cfg *config.Config) {
 	log.Infoln("[IPTABLES] Setting iptables completed")
 }
 
+func updateMitm(mitm *config.Mitm) {
+	listener.ReCreateMitm(mitm.Port, tunnel.Tunnel)
+	tunnel.UpdateRewrites(mitm.Rules)
+}
+
 func Shutdown() {
-	listener.Cleanup(false)
+	listener.Cleanup()
 	tproxy.CleanupTProxyIPTables()
 	resolver.StoreFakePoolState()
 
-	log.Warnln("Clash shutting down")
+	log.Warnln("Mihomo shutting down")
 }

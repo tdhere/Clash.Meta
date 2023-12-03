@@ -15,9 +15,9 @@ import (
 	"sync"
 	"time"
 
-	tlsC "github.com/Dreamacro/clash/component/tls"
-	C "github.com/Dreamacro/clash/constant"
-	"github.com/Dreamacro/clash/log"
+	"github.com/metacubex/mihomo/component/ca"
+	C "github.com/metacubex/mihomo/constant"
+	"github.com/metacubex/mihomo/log"
 	"github.com/metacubex/quic-go"
 	"github.com/metacubex/quic-go/http3"
 	D "github.com/miekg/dns"
@@ -155,11 +155,6 @@ func (doh *dnsOverHTTPS) ExchangeContext(ctx context.Context, m *D.Msg) (msg *D.
 	}
 
 	return msg, err
-}
-
-// Exchange implements the Upstream interface for *dnsOverHTTPS.
-func (doh *dnsOverHTTPS) Exchange(m *D.Msg) (*D.Msg, error) {
-	return doh.ExchangeContext(context.Background(), m)
 }
 
 // Close implements the Upstream interface for *dnsOverHTTPS.
@@ -382,7 +377,7 @@ func (doh *dnsOverHTTPS) createClient(ctx context.Context) (*http.Client, error)
 // HTTP3 is enabled in the upstream options).  If this attempt is successful,
 // it returns an HTTP3 transport, otherwise it returns the H1/H2 transport.
 func (doh *dnsOverHTTPS) createTransport(ctx context.Context) (t http.RoundTripper, err error) {
-	tlsConfig := tlsC.GetGlobalTLSConfig(
+	tlsConfig := ca.GetGlobalTLSConfig(
 		&tls.Config{
 			InsecureSkipVerify:     false,
 			MinVersion:             tls.VersionTLS12,

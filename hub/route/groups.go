@@ -8,10 +8,11 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Dreamacro/clash/adapter"
-	"github.com/Dreamacro/clash/common/utils"
-	C "github.com/Dreamacro/clash/constant"
-	"github.com/Dreamacro/clash/tunnel"
+	"github.com/metacubex/mihomo/adapter"
+	"github.com/metacubex/mihomo/adapter/outboundgroup"
+	"github.com/metacubex/mihomo/common/utils"
+	C "github.com/metacubex/mihomo/constant"
+	"github.com/metacubex/mihomo/tunnel"
 )
 
 func GroupRouter() http.Handler {
@@ -57,6 +58,11 @@ func getGroupDelay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if proxy.(*adapter.Proxy).Type() == C.URLTest {
+		URLTestGroup := proxy.(*adapter.Proxy).ProxyAdapter.(*outboundgroup.URLTest)
+		URLTestGroup.ForceSet("")
+	}
+
 	query := r.URL.Query()
 	url := query.Get("url")
 	timeout, err := strconv.ParseInt(query.Get("timeout"), 10, 32)
@@ -77,7 +83,6 @@ func getGroupDelay(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	dm, err := group.URLTest(ctx, url, expectedStatus)
-
 	if err != nil {
 		render.Status(r, http.StatusGatewayTimeout)
 		render.JSON(w, r, newError(err.Error()))

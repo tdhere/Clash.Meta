@@ -2,22 +2,22 @@ package http
 
 import (
 	"context"
+	"crypto/tls"
 	"io"
 	"net"
 	"net/http"
 	URL "net/url"
+	"runtime"
 	"strings"
 	"time"
 
-	"github.com/Dreamacro/clash/component/tls"
-	"github.com/Dreamacro/clash/listener/inner"
-)
-
-const (
-	UA = "clash.meta"
+	"github.com/metacubex/mihomo/component/ca"
+	C "github.com/metacubex/mihomo/constant"
+	"github.com/metacubex/mihomo/listener/inner"
 )
 
 func HttpRequest(ctx context.Context, url, method string, header map[string][]string, body io.Reader) (*http.Response, error) {
+	UA := C.UA
 	method = strings.ToUpper(method)
 	urlRes, err := URL.Parse(url)
 	if err != nil {
@@ -48,6 +48,7 @@ func HttpRequest(ctx context.Context, url, method string, header map[string][]st
 
 	transport := &http.Transport{
 		// from http.DefaultTransport
+		DisableKeepAlives:     runtime.GOOS == "android",
 		MaxIdleConns:          100,
 		IdleConnTimeout:       30 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
@@ -60,7 +61,7 @@ func HttpRequest(ctx context.Context, url, method string, header map[string][]st
 				return d.DialContext(ctx, network, address)
 			}
 		},
-		TLSClientConfig: tls.GetDefaultTLSConfig(),
+		TLSClientConfig: ca.GetGlobalTLSConfig(&tls.Config{}),
 	}
 
 	client := http.Client{Transport: transport}

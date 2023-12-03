@@ -8,10 +8,15 @@ mixed-port: 10801 # HTTP(S) 和 SOCKS 代理混合端口
 
 allow-lan: true # 允许局域网连接
 bind-address: "*" # 绑定 IP 地址，仅作用于 allow-lan 为 true，'*'表示所有地址
+authentication: # http,socks入口的验证用户名，密码
+  - "username:password"
+skip-auth-prefixes: # 设置跳过验证的IP段
+  - 127.0.0.1/8
+  - ::1/128
 
 #  find-process-mode has 3 values:always, strict, off
 #  - always, 开启，强制匹配所有进程
-#  - strict, 默认，由 clash 判断是否开启
+#  - strict, 默认，由 mihomo 判断是否开启
 #  - off, 不匹配进程，推荐在路由器上使用此模式
 find-process-mode: strict
 
@@ -41,7 +46,11 @@ external-controller-tls: 0.0.0.0:9443 # RESTful API HTTPS 监听地址，需要�
 # secret: "123456" # `Authorization:Bearer ${secret}`
 
 # tcp-concurrent: true # TCP 并发连接所有 IP, 将使用最快握手的 TCP
-external-ui: /path/to/ui/folder # 配置 WEB UI 目录，使用 http://{{external-controller}}/ui 访问
+
+# 配置 WEB UI 目录，使用 http://{{external-controller}}/ui 访问
+external-ui: /path/to/ui/folder/
+external-ui-name: xd
+external-ui-url: "https://github.com/MetaCubeX/metacubexd/archive/refs/heads/gh-pages.zip"
 
 # interface-name: en0 # 设置出口网卡
 
@@ -50,16 +59,26 @@ external-ui: /path/to/ui/folder # 配置 WEB UI 目录，使用 http://{{externa
 # Utls is currently support TLS transport in TCP/grpc/WS/HTTP for VLESS/Vmess and trojan.
 global-client-fingerprint: chrome
 
+#  TCP keep alive interval
+keep-alive-interval: 15
+
 # routing-mark:6666 # 配置 fwmark 仅用于 Linux
 experimental:
+  # Disable quic-go GSO support. This may result in reduced performance on Linux.
+  # This is not recommended for most users.
+  # Only users encountering issues with quic-go's internal implementation should enable this,
+  # and they should disable it as soon as the issue is resolved.
+  # This field will be removed when quic-go fixes all their issues in GSO.
+  # This equivalent to the environment variable QUIC_GO_DISABLE_GSO=1.
+  #quic-go-disable-gso: true
 
 # 类似于 /etc/hosts, 仅支持配置单个 IP
 hosts:
-# '*.clash.dev': 127.0.0.1
+# '*.mihomo.dev': 127.0.0.1
 # '.dev': 127.0.0.1
-# 'alpha.clash.dev': '::1'
+# 'alpha.mihomo.dev': '::1'
 # test.com: [1.1.1.1, 2.2.2.2]
-# clash.lan: clash # clash 为特别字段，将加入本地所有网卡的地址
+# home.lan: lan # lan 为特别字段，将加入本地所有网卡的地址
 # baidu.com: google.com # 只允许配置一个别名
 
 profile: # 存储 select 选择记录
@@ -123,7 +142,9 @@ sniffer:
   # 是否使用嗅探结果作为实际访问，默认 true
   # 全局配置，优先级低于 sniffer.sniff 实际配置
   override-destination: false
-  sniff: # TLS 默认如果不配置 ports 默认嗅探 443
+  sniff: # TLS 和 QUIC 默认如果不配置 ports 默认嗅探 443
+    QUIC:
+    #  ports: [ 443 ]
     TLS:
     #  ports: [443, 8443]
 
@@ -162,6 +183,7 @@ tunnels: # one line config
 
 # DNS配置
 dns:
+  cache-algorithm: arc
   enable: false # 关闭将使用系统 DNS
   prefer-h3: true # 开启 DoH 支持 HTTP/3，将并发尝试
   listen: 0.0.0.0:53 # 开启 DNS 服务器监听
@@ -331,16 +353,17 @@ proxies: # socks5
     plugin: v2ray-plugin
     plugin-opts:
       mode: websocket # no QUIC now
-    # tls: true # wss
-    # 可使用 openssl x509 -noout -fingerprint -sha256 -inform pem -in yourcert.pem 获取
-    # 配置指纹将实现 SSL Pining 效果
-    # fingerprint: xxxx
-    # skip-cert-verify: true
-    # host: bing.com
-    # path: "/"
-    # mux: true
-    # headers:
-    #   custom: value
+      # tls: true # wss
+      # 可使用 openssl x509 -noout -fingerprint -sha256 -inform pem -in yourcert.pem 获取
+      # 配置指纹将实现 SSL Pining 效果
+      # fingerprint: xxxx
+      # skip-cert-verify: true
+      # host: bing.com
+      # path: "/"
+      # mux: true
+      # headers:
+      #   custom: value
+      # v2ray-http-upgrade: false
 
   - name: "ss4-shadow-tls"
     type: ss
@@ -413,11 +436,12 @@ proxies: # socks5
     # servername: example.com # priority over wss host
     # network: ws
     # ws-opts:
-    #   path: /path
-    #   headers:
-    #     Host: v2ray.com
-    #   max-early-data: 2048
-    #   early-data-header-name: Sec-WebSocket-Protocol
+      # path: /path
+      # headers:
+      #   Host: v2ray.com
+      # max-early-data: 2048
+      # early-data-header-name: Sec-WebSocket-Protocol
+      # v2ray-http-upgrade: false
 
   - name: "vmess-h2"
     type: vmess
@@ -545,6 +569,7 @@ proxies: # socks5
       path: "/"
       headers:
         Host: example.com
+      # v2ray-http-upgrade: false
 
   # Trojan
   - name: "trojan"
@@ -585,9 +610,10 @@ proxies: # socks5
     # fingerprint: xxxx
     udp: true
     # ws-opts:
-    # path: /path
-    # headers:
-    #   Host: example.com
+    #   path: /path
+    #   headers:
+    #     Host: example.com
+    #   v2ray-http-upgrade: false
 
   - name: "trojan-xtls"
     type: trojan
@@ -627,6 +653,25 @@ proxies: # socks5
     # disable_mtu_discovery: false
     # fingerprint: xxxx
     # fast-open: true # 支持 TCP 快速打开，默认为 false
+
+  #hysteria2
+  - name: "hysteria2"
+    type: hysteria2
+    server: server.com
+    port: 443
+    #  up和down均不写或为0则使用BBR流控
+    # up: "30 Mbps" # 若不写单位，默认为 Mbps
+    # down: "200 Mbps" # 若不写单位，默认为 Mbps
+    password: yourpassword
+    # obfs: salamander # 默认为空，如果填写则开启obfs，目前仅支持salamander
+    # obfs-password: yourpassword
+    # sni: server.com
+    # skip-cert-verify: false
+    # fingerprint: xxxx
+    # alpn:
+    #   - h3
+    # ca: "./my.ca"
+    # ca-str: "xyz"
 
   # wireguard
   - name: "wg"
@@ -681,6 +726,11 @@ proxies: # socks5
     # skip-cert-verify: true
     # max-open-streams: 20 # default 100, too many open streams may hurt performance
     # sni: example.com
+    #
+    # meta和sing-box私有扩展，将ss-uot用于udp中继，开启此选项后udp-relay-mode将失效
+    # 警告，与原版tuic不兼容！！！
+    # udp-over-stream: false
+    # udp-over-stream-version: 1
 
   # ShadowsocksR
   # The supported ciphers (encryption methods): all stream ciphers in ss
@@ -705,7 +755,7 @@ proxies: # socks5
 proxy-groups:
   # 代理链，目前relay可以支持udp的只有vmess/vless/trojan/ss/ssr/tuic
   # wireguard目前不支持在relay中使用，请使用proxy中的dialer-proxy配置项
-  # Traffic: clash <-> http <-> vmess <-> ss1 <-> ss2 <-> Internet
+  # Traffic: mihomo <-> http <-> vmess <-> ss1 <-> ss2 <-> Internet
   - name: "relay"
     type: relay
     proxies:
@@ -774,13 +824,13 @@ proxy-groups:
       - Proxy
       - DIRECT
 
-# Clash 格式的节点或支持 *ray 的分享格式
+# Mihomo 格式的节点或支持 *ray 的分享格式
 proxy-providers:
   provider1:
     type: http # http 的 path 可空置,默认储存路径为 homedir的proxies文件夹,文件名为url的md5
     url: "url"
     interval: 3600
-    path: ./provider1.yaml # 默认只允许存储在 clash 的 Home Dir，如果想存储到任意位置，添加环境变量 SKIP_SAFE_PATH_CHECK=1
+    path: ./provider1.yaml # 默认只允许存储在 mihomo 的 Home Dir，如果想存储到任意位置，添加环境变量 SKIP_SAFE_PATH_CHECK=1
     health-check:
       enable: true
       interval: 600
@@ -797,7 +847,7 @@ rule-providers:
   rule1:
     behavior: classical # domain ipcidr
     interval: 259200
-    path: /path/to/save/file.yaml # 默认只允许存储在 clash 的 Home Dir，如果想存储到任意位置，添加环境变量 SKIP_SAFE_PATH_CHECK=1
+    path: /path/to/save/file.yaml # 默认只允许存储在 mihomo 的 Home Dir，如果想存储到任意位置，添加环境变量 SKIP_SAFE_PATH_CHECK=1
     type: http # http 的 path 可空置,默认储存路径为 homedir的rules文件夹,文件名为url的md5
     url: "url"
   rule2:
@@ -898,6 +948,10 @@ listeners:
       - username: 1
         uuid: 9d0cb9d0-964f-4ef6-897d-6c6b3ccf9e68
         alterId: 1
+    # ws-path: "/" # 如果不为空则开启websocket传输层
+    # 下面两项如果填写则开启tls（需要同时填写）
+    # certificate: ./server.crt
+    # private-key: ./server.key
 
   - name: tuic-in-1
     type: tuic

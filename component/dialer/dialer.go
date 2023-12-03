@@ -12,7 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Dreamacro/clash/component/resolver"
+	"github.com/metacubex/mihomo/component/resolver"
+	"github.com/metacubex/mihomo/constant/features"
 )
 
 type dialFunc func(ctx context.Context, network string, ips []netip.Addr, port string, opt *option) (net.Conn, error)
@@ -71,11 +72,19 @@ func DialContext(ctx context.Context, network, address string, options ...Option
 }
 
 func ListenPacket(ctx context.Context, network, address string, options ...Option) (net.PacketConn, error) {
+	if features.CMFA && DefaultSocketHook != nil {
+		return listenPacketHooked(ctx, network, address)
+	}
+
 	cfg := applyOptions(options...)
 
 	lc := &net.ListenConfig{}
 	if cfg.interfaceName != "" {
-		addr, err := bindIfaceToListenConfig(cfg.interfaceName, lc, network, address)
+		bind := bindIfaceToListenConfig
+		if cfg.fallbackBind {
+			bind = fallbackBindIfaceToListenConfig
+		}
+		addr, err := bind(cfg.interfaceName, lc, network, address)
 		if err != nil {
 			return nil, err
 		}
@@ -111,6 +120,10 @@ func GetTcpConcurrent() bool {
 }
 
 func dialContext(ctx context.Context, network string, destination netip.Addr, port string, opt *option) (net.Conn, error) {
+	if features.CMFA && DefaultSocketHook != nil {
+		return dialContextHooked(ctx, network, destination, port)
+	}
+
 	address := net.JoinHostPort(destination.String(), port)
 
 	netDialer := opt.netDialer
@@ -126,12 +139,19 @@ func dialContext(ctx context.Context, network string, destination netip.Addr, po
 
 	dialer := netDialer.(*net.Dialer)
 	if opt.interfaceName != "" {
-		if err := bindIfaceToDialer(opt.interfaceName, dialer, network, destination); err != nil {
+		bind := bindIfaceToDialer
+		if opt.fallbackBind {
+			bind = fallbackBindIfaceToDialer
+		}
+		if err := bind(opt.interfaceName, dialer, network, destination); err != nil {
 			return nil, err
 		}
 	}
 	if opt.routingMark != 0 {
 		bindMarkToDialer(opt.routingMark, dialer, network, destination)
+	}
+	if opt.mpTcp {
+		setMultiPathTCP(dialer)
 	}
 	if opt.tfo {
 		return dialTFO(ctx, *dialer, network, address)
@@ -160,14 +180,22 @@ func concurrentDualStackDialContext(ctx context.Context, network string, ips []n
 
 func dualStackDialContext(ctx context.Context, dialFn dialFunc, network string, ips []netip.Addr, port string, opt *option) (net.Conn, error) {
 	ipv4s, ipv6s := resolver.SortationAddr(ips)
-	preferIPVersion := opt.prefer
+	if len(ipv4s) == 0 && len(ipv6s) == 0 {
+		return nil, ErrorNoIpAddress
+	}
 
+	preferIPVersion := opt.prefer
 	fallbackTicker := time.NewTicker(fallbackTimeout)
 	defer fallbackTicker.Stop()
+
 	results := make(chan dialResult)
 	returned := make(chan struct{})
 	defer close(returned)
+
+	var wg sync.WaitGroup
+
 	racer := func(ips []netip.Addr, isPrimary bool) {
+		defer wg.Done()
 		result := dialResult{isPrimary: isPrimary}
 		defer func() {
 			select {
@@ -180,18 +208,36 @@ func dualStackDialContext(ctx context.Context, dialFn dialFunc, network string, 
 		}()
 		result.Conn, result.error = dialFn(ctx, network, ips, port, opt)
 	}
-	go racer(ipv4s, preferIPVersion != 6)
-	go racer(ipv6s, preferIPVersion != 4)
+
+	if len(ipv4s) != 0 {
+		wg.Add(1)
+		go racer(ipv4s, preferIPVersion != 6)
+	}
+
+	if len(ipv6s) != 0 {
+		wg.Add(1)
+		go racer(ipv6s, preferIPVersion != 4)
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
 	var fallback dialResult
 	var errs []error
-	for i := 0; i < 2; {
+
+loop:
+	for {
 		select {
 		case <-fallbackTicker.C:
 			if fallback.error == nil && fallback.Conn != nil {
 				return fallback.Conn, nil
 			}
-		case res := <-results:
-			i++
+		case res, ok := <-results:
+			if !ok {
+				break loop
+			}
 			if res.error == nil {
 				if res.isPrimary {
 					return res.Conn, nil
@@ -206,6 +252,7 @@ func dualStackDialContext(ctx context.Context, dialFn dialFunc, network string, 
 			}
 		}
 	}
+
 	if fallback.error == nil && fallback.Conn != nil {
 		return fallback.Conn, nil
 	}

@@ -1,18 +1,12 @@
 package config
 
 import (
-	"context"
 	"fmt"
-	"io"
-	"net/http"
-	"os"
 	"runtime"
-	"time"
 
-	"github.com/Dreamacro/clash/component/geodata"
-	_ "github.com/Dreamacro/clash/component/geodata/standard"
-	clashHttp "github.com/Dreamacro/clash/component/http"
-	C "github.com/Dreamacro/clash/constant"
+	"github.com/metacubex/mihomo/component/geodata"
+	_ "github.com/metacubex/mihomo/component/geodata/standard"
+	C "github.com/metacubex/mihomo/constant"
 
 	"github.com/oschwald/maxminddb-golang"
 )
@@ -71,20 +65,4 @@ func UpdateGeoDatabases() error {
 	geodata.ClearCache()
 
 	return nil
-}
-
-func downloadForBytes(url string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*90)
-	defer cancel()
-	resp, err := clashHttp.HttpRequest(ctx, url, http.MethodGet, http.Header{"User-Agent": {"clash"}}, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	return io.ReadAll(resp.Body)
-}
-
-func saveFile(bytes []byte, path string) error {
-	return os.WriteFile(path, bytes, 0o644)
 }
