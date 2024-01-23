@@ -2,15 +2,17 @@ package route
 
 import (
 	"context"
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/render"
 	"net/http"
 	"strconv"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/render"
+
 	"github.com/metacubex/mihomo/adapter"
 	"github.com/metacubex/mihomo/adapter/outboundgroup"
 	"github.com/metacubex/mihomo/common/utils"
+	"github.com/metacubex/mihomo/component/profile/cachefile"
 	C "github.com/metacubex/mihomo/constant"
 	"github.com/metacubex/mihomo/tunnel"
 )
@@ -63,6 +65,10 @@ func getGroupDelay(w http.ResponseWriter, r *http.Request) {
 		URLTestGroup.ForceSet("")
 	}
 
+	if proxy.(*adapter.Proxy).Type() != C.Selector {
+		cachefile.Cache().SetSelected(proxy.Name(), "")
+	}
+
 	query := r.URL.Query()
 	url := query.Get("url")
 	timeout, err := strconv.ParseInt(query.Get("timeout"), 10, 32)
@@ -72,7 +78,7 @@ func getGroupDelay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	expectedStatus, err := utils.NewIntRanges[uint16](query.Get("expected"))
+	expectedStatus, err := utils.NewUnsignedRanges[uint16](query.Get("expected"))
 	if err != nil {
 		render.Status(r, http.StatusBadRequest)
 		render.JSON(w, r, ErrBadRequest)

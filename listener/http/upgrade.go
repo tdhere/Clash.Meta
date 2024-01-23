@@ -42,7 +42,7 @@ func handleUpgrade(conn net.Conn, request *http.Request, tunnel C.Tunnel, additi
 		return
 	}
 
-	left, right := net.Pipe()
+	left, right := N.Pipe()
 
 	go tunnel.HandleTCPConn(inbound.NewHTTP(dstAddr, conn, right, additions...))
 

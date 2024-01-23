@@ -56,8 +56,11 @@ type General struct {
 	Interface               string            `json:"interface-name"`
 	RoutingMark             int               `json:"-"`
 	GeoXUrl                 GeoXUrl           `json:"geox-url"`
+	GeoAutoUpdate           bool              `json:"geo-auto-update"`
+	GeoUpdateInterval       int               `json:"geo-update-interval"`
 	GeodataMode             bool              `json:"geodata-mode"`
 	GeodataLoader           string            `json:"geodata-loader"`
+	GeositeMatcher          string            `json:"geosite-matcher"`
 	TCPConcurrent           bool              `json:"tcp-concurrent"`
 	FindProcessMode         P.FindProcessMode `json:"find-process-mode"`
 	Sniffing                bool              `json:"sniffing"`
@@ -79,6 +82,8 @@ type Inbound struct {
 	VmessConfig       string         `json:"vmess-config"`
 	Authentication    []string       `json:"authentication"`
 	SkipAuthPrefixes  []netip.Prefix `json:"skip-auth-prefixes"`
+	LanAllowedIPs     []netip.Prefix `json:"lan-allowed-ips"`
+	LanDisAllowedIPs  []netip.Prefix `json:"lan-disallowed-ips"`
 	AllowLan          bool           `json:"allow-lan"`
 	BindAddress       string         `json:"bind-address"`
 	InboundTfo        bool           `json:"inbound-tfo"`
@@ -125,11 +130,11 @@ type DNS struct {
 
 // FallbackFilter config
 type FallbackFilter struct {
-	GeoIP     bool                    `yaml:"geoip"`
-	GeoIPCode string                  `yaml:"geoip-code"`
-	IPCIDR    []netip.Prefix          `yaml:"ipcidr"`
-	Domain    []string                `yaml:"domain"`
-	GeoSite   []*router.DomainMatcher `yaml:"geosite"`
+	GeoIP     bool                   `yaml:"geoip"`
+	GeoIPCode string                 `yaml:"geoip-code"`
+	IPCIDR    []netip.Prefix         `yaml:"ipcidr"`
+	Domain    []string               `yaml:"domain"`
+	GeoSite   []router.DomainMatcher `yaml:"geosite"`
 }
 
 // Profile config
@@ -245,7 +250,9 @@ type RawTun struct {
 	AutoDetectInterface bool       `yaml:"auto-detect-interface"`
 	RedirectToTun       []string   `yaml:"-" json:"-"`
 
-	MTU uint32 `yaml:"mtu" json:"mtu,omitempty"`
+	MTU        uint32 `yaml:"mtu" json:"mtu,omitempty"`
+	GSO        bool   `yaml:"gso" json:"gso,omitempty"`
+	GSOMaxSize uint32 `yaml:"gso-max-size" json:"gso-max-size,omitempty"`
 	//Inet4Address           []netip.Prefix `yaml:"inet4-address" json:"inet4_address,omitempty"`
 	Inet6Address             []netip.Prefix `yaml:"inet6-address" json:"inet6_address,omitempty"`
 	StrictRoute              bool           `yaml:"strict-route" json:"strict_route,omitempty"`
@@ -253,6 +260,8 @@ type RawTun struct {
 	Inet6RouteAddress        []netip.Prefix `yaml:"inet6-route-address" json:"inet6_route_address,omitempty"`
 	Inet4RouteExcludeAddress []netip.Prefix `yaml:"inet4-route-exclude-address" json:"inet4_route_exclude_address,omitempty"`
 	Inet6RouteExcludeAddress []netip.Prefix `yaml:"inet6-route-exclude-address" json:"inet6_route_exclude_address,omitempty"`
+	IncludeInterface         []string       `yaml:"include-interface" json:"include-interface,omitempty"`
+	ExcludeInterface         []string       `yaml:"exclude-interface" json:"exclude-interface,omitempty"`
 	IncludeUID               []uint32       `yaml:"include-uid" json:"include_uid,omitempty"`
 	IncludeUIDRange          []string       `yaml:"include-uid-range" json:"include_uid_range,omitempty"`
 	ExcludeUID               []uint32       `yaml:"exclude-uid" json:"exclude_uid,omitempty"`
@@ -298,6 +307,8 @@ type RawConfig struct {
 	InboundMPTCP            bool              `yaml:"inbound-mptcp"`
 	Authentication          []string          `yaml:"authentication" json:"authentication"`
 	SkipAuthPrefixes        []netip.Prefix    `yaml:"skip-auth-prefixes"`
+	LanAllowedIPs           []netip.Prefix    `yaml:"lan-allowed-ips"`
+	LanDisAllowedIPs        []netip.Prefix    `yaml:"lan-disallowed-ips"`
 	AllowLan                bool              `yaml:"allow-lan" json:"allow-lan"`
 	BindAddress             string            `yaml:"bind-address" json:"bind-address"`
 	Mode                    T.TunnelMode      `yaml:"mode" json:"mode"`
@@ -313,8 +324,11 @@ type RawConfig struct {
 	Interface               string            `yaml:"interface-name"`
 	RoutingMark             int               `yaml:"routing-mark"`
 	Tunnels                 []LC.Tunnel       `yaml:"tunnels"`
+	GeoAutoUpdate           bool              `yaml:"geo-auto-update" json:"geo-auto-update"`
+	GeoUpdateInterval       int               `yaml:"geo-update-interval" json:"geo-update-interval"`
 	GeodataMode             bool              `yaml:"geodata-mode" json:"geodata-mode"`
 	GeodataLoader           string            `yaml:"geodata-loader" json:"geodata-loader"`
+	GeositeMatcher          string            `yaml:"geosite-matcher" json:"geosite-matcher"`
 	TCPConcurrent           bool              `yaml:"tcp-concurrent" json:"tcp-concurrent"`
 	FindProcessMode         P.FindProcessMode `yaml:"find-process-mode" json:"find-process-mode"`
 	GlobalClientFingerprint string            `yaml:"global-client-fingerprint"`
@@ -393,22 +407,25 @@ func Parse(buf []byte) (*Config, error) {
 func UnmarshalRawConfig(buf []byte) (*RawConfig, error) {
 	// config with default value
 	rawCfg := &RawConfig{
-		AllowLan:        false,
-		BindAddress:     "*",
-		IPv6:            true,
-		Mode:            T.Rule,
-		GeodataMode:     C.GeodataMode,
-		GeodataLoader:   "memconservative",
-		UnifiedDelay:    false,
-		Authentication:  []string{},
-		LogLevel:        log.INFO,
-		Hosts:           map[string]any{},
-		Rule:            []string{},
-		Proxy:           []map[string]any{},
-		ProxyGroup:      []map[string]any{},
-		TCPConcurrent:   false,
-		FindProcessMode: P.FindProcessStrict,
-		GlobalUA:        "clash.meta",
+		AllowLan:          false,
+		BindAddress:       "*",
+		LanAllowedIPs:     []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0")},
+		IPv6:              true,
+		Mode:              T.Rule,
+		GeoAutoUpdate:     false,
+		GeoUpdateInterval: 24,
+		GeodataMode:       C.GeodataMode,
+		GeodataLoader:     "memconservative",
+		UnifiedDelay:      false,
+		Authentication:    []string{},
+		LogLevel:          log.INFO,
+		Hosts:             map[string]any{},
+		Rule:              []string{},
+		Proxy:             []map[string]any{},
+		ProxyGroup:        []map[string]any{},
+		TCPConcurrent:     false,
+		FindProcessMode:   P.FindProcessStrict,
+		GlobalUA:          "clash.meta",
 		Tun: RawTun{
 			Enable:              false,
 			Device:              "",
@@ -542,6 +559,7 @@ func ParseRawConfig(rawCfg *RawConfig) (*Config, error) {
 	config.Listeners = listener
 
 	log.Infoln("Geodata Loader mode: %s", geodata.LoaderName())
+	log.Infoln("Geosite Matcher implementation: %s", geodata.SiteMatcherName())
 	ruleProviders, err := parseRuleProviders(rawCfg)
 	if err != nil {
 		return nil, err
@@ -616,6 +634,9 @@ func ParseRawConfig(rawCfg *RawConfig) (*Config, error) {
 
 func parseGeneral(cfg *RawConfig) (*General, error) {
 	geodata.SetLoader(cfg.GeodataLoader)
+	geodata.SetSiteMatcher(cfg.GeositeMatcher)
+	C.GeoAutoUpdate = cfg.GeoAutoUpdate
+	C.GeoUpdateInterval = cfg.GeoUpdateInterval
 	C.GeoIpUrl = cfg.GeoXUrl.GeoIp
 	C.GeoSiteUrl = cfg.GeoXUrl.GeoSite
 	C.MmdbUrl = cfg.GeoXUrl.Mmdb
@@ -662,6 +683,8 @@ func parseGeneral(cfg *RawConfig) (*General, error) {
 			VmessConfig:       cfg.VmessConfig,
 			AllowLan:          cfg.AllowLan,
 			SkipAuthPrefixes:  cfg.SkipAuthPrefixes,
+			LanAllowedIPs:     cfg.LanAllowedIPs,
+			LanDisAllowedIPs:  cfg.LanDisAllowedIPs,
 			BindAddress:       cfg.BindAddress,
 			InboundTfo:        cfg.InboundTfo,
 			InboundMPTCP:      cfg.InboundMPTCP,
@@ -679,6 +702,8 @@ func parseGeneral(cfg *RawConfig) (*General, error) {
 		Interface:               cfg.Interface,
 		RoutingMark:             cfg.RoutingMark,
 		GeoXUrl:                 cfg.GeoXUrl,
+		GeoAutoUpdate:           cfg.GeoAutoUpdate,
+		GeoUpdateInterval:       cfg.GeoUpdateInterval,
 		GeodataMode:             cfg.GeodataMode,
 		GeodataLoader:           cfg.GeodataLoader,
 		TCPConcurrent:           cfg.TCPConcurrent,
@@ -697,6 +722,7 @@ func parseProxies(cfg *RawConfig) (proxies map[string]C.Proxy, providersMap map[
 	providersConfig := cfg.ProxyProvider
 
 	var proxyList []string
+	var AllProxies []string
 	proxiesList := list.New()
 	groupsList := list.New()
 
@@ -724,6 +750,7 @@ func parseProxies(cfg *RawConfig) (proxies map[string]C.Proxy, providersMap map[
 		}
 		proxies[proxy.Name()] = proxy
 		proxyList = append(proxyList, proxy.Name())
+		AllProxies = append(AllProxies, proxy.Name())
 		proxiesList.PushBack(mapping)
 	}
 
@@ -742,6 +769,7 @@ func parseProxies(cfg *RawConfig) (proxies map[string]C.Proxy, providersMap map[
 		return nil, nil, err
 	}
 
+	var AllProviders []string
 	// parse and initial providers
 	for name, mapping := range providersConfig {
 		if name == provider.ReservedName {
@@ -754,11 +782,12 @@ func parseProxies(cfg *RawConfig) (proxies map[string]C.Proxy, providersMap map[
 		}
 
 		providersMap[name] = pd
+		AllProviders = append(AllProviders, name)
 	}
 
 	// parse proxy group
 	for idx, mapping := range groupsConfig {
-		group, err := outboundgroup.ParseProxyGroup(mapping, proxies, providersMap)
+		group, err := outboundgroup.ParseProxyGroup(mapping, proxies, providersMap, AllProxies, AllProviders)
 		if err != nil {
 			return nil, nil, fmt.Errorf("proxy group[%d]: %w", idx, err)
 		}
@@ -1144,7 +1173,7 @@ func parseNameServerPolicy(nsPolicy *orderedmap.OrderedMap[string, any], rulePro
 
 	for pair := nsPolicy.Oldest(); pair != nil; pair = pair.Next() {
 		k, v := pair.Key, pair.Value
-		if strings.Contains(k, ",") {
+		if strings.Contains(strings.ToLower(k), ",") {
 			if strings.Contains(k, "geosite:") {
 				subkeys := strings.Split(k, ":")
 				subkeys = subkeys[1:]
@@ -1153,7 +1182,7 @@ func parseNameServerPolicy(nsPolicy *orderedmap.OrderedMap[string, any], rulePro
 					newKey := "geosite:" + subkey
 					updatedPolicy.Store(newKey, v)
 				}
-			} else if strings.Contains(k, "rule-set:") {
+			} else if strings.Contains(strings.ToLower(k), "rule-set:") {
 				subkeys := strings.Split(k, ":")
 				subkeys = subkeys[1:]
 				subkeys = strings.Split(subkeys[0], ",")
@@ -1168,6 +1197,11 @@ func parseNameServerPolicy(nsPolicy *orderedmap.OrderedMap[string, any], rulePro
 				}
 			}
 		} else {
+			if strings.Contains(strings.ToLower(k), "geosite:") {
+				updatedPolicy.Store("geosite:"+k[8:], v)
+			} else if strings.Contains(strings.ToLower(k), "rule-set:") {
+				updatedPolicy.Store("rule-set:"+k[9:], v)
+			}
 			updatedPolicy.Store(k, v)
 		}
 	}
@@ -1218,8 +1252,8 @@ func parseFallbackIPCIDR(ips []string) ([]netip.Prefix, error) {
 	return ipNets, nil
 }
 
-func parseFallbackGeoSite(countries []string, rules []C.Rule) ([]*router.DomainMatcher, error) {
-	var sites []*router.DomainMatcher
+func parseFallbackGeoSite(countries []string, rules []C.Rule) ([]router.DomainMatcher, error) {
+	var sites []router.DomainMatcher
 	if len(countries) > 0 {
 		if err := geodata.InitGeoSite(); err != nil {
 			return nil, fmt.Errorf("can't initial GeoSite: %s", err)
@@ -1281,7 +1315,7 @@ func parseDNS(rawCfg *RawConfig, hosts *trie.DomainTrie[resolver.HostValue], rul
 		EnhancedMode: cfg.EnhancedMode,
 		FallbackFilter: FallbackFilter{
 			IPCIDR:  []netip.Prefix{},
-			GeoSite: []*router.DomainMatcher{},
+			GeoSite: []router.DomainMatcher{},
 		},
 	}
 	var err error
@@ -1424,6 +1458,8 @@ func parseTun(rawTun RawTun, general *General) error {
 		RedirectToTun:       rawTun.RedirectToTun,
 
 		MTU:                      rawTun.MTU,
+		GSO:                      rawTun.GSO,
+		GSOMaxSize:               rawTun.GSOMaxSize,
 		Inet4Address:             []netip.Prefix{tunAddressPrefix},
 		Inet6Address:             rawTun.Inet6Address,
 		StrictRoute:              rawTun.StrictRoute,
@@ -1431,6 +1467,8 @@ func parseTun(rawTun RawTun, general *General) error {
 		Inet6RouteAddress:        rawTun.Inet6RouteAddress,
 		Inet4RouteExcludeAddress: rawTun.Inet4RouteExcludeAddress,
 		Inet6RouteExcludeAddress: rawTun.Inet6RouteExcludeAddress,
+		IncludeInterface:         rawTun.IncludeInterface,
+		ExcludeInterface:         rawTun.ExcludeInterface,
 		IncludeUID:               rawTun.IncludeUID,
 		IncludeUIDRange:          rawTun.IncludeUIDRange,
 		ExcludeUID:               rawTun.ExcludeUID,
@@ -1475,7 +1513,7 @@ func parseSniffer(snifferRaw RawSniffer) (*Sniffer, error) {
 	if len(snifferRaw.Sniff) != 0 {
 		for sniffType, sniffConfig := range snifferRaw.Sniff {
 			find := false
-			ports, err := utils.NewIntRangesFromList[uint16](sniffConfig.Ports)
+			ports, err := utils.NewUnsignedRangesFromList[uint16](sniffConfig.Ports)
 			if err != nil {
 				return nil, err
 			}
@@ -1502,7 +1540,7 @@ func parseSniffer(snifferRaw RawSniffer) (*Sniffer, error) {
 			// Deprecated: Use Sniff instead
 			log.Warnln("Deprecated: Use Sniff instead")
 		}
-		globalPorts, err := utils.NewIntRangesFromList[uint16](snifferRaw.Ports)
+		globalPorts, err := utils.NewUnsignedRangesFromList[uint16](snifferRaw.Ports)
 		if err != nil {
 			return nil, err
 		}

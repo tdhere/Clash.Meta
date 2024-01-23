@@ -41,7 +41,7 @@ func (gf *geoipFilter) Match(ip netip.Addr) bool {
 			return false
 		}
 	}
-	return !geoIPMatcher.Match(ip.AsSlice())
+	return !geoIPMatcher.Match(ip)
 }
 
 type ipnetFilter struct {
@@ -74,7 +74,7 @@ func (df *domainFilter) Match(domain string) bool {
 }
 
 type geoSiteFilter struct {
-	matchers []*router.DomainMatcher
+	matchers []router.DomainMatcher
 }
 
 func NewGeoSite(group string) (fallbackDomainFilter, error) {
@@ -87,7 +87,7 @@ func NewGeoSite(group string) (fallbackDomainFilter, error) {
 		return nil, err
 	}
 	filter := &geoSiteFilter{
-		matchers: []*router.DomainMatcher{matcher},
+		matchers: []router.DomainMatcher{matcher},
 	}
 	return filter, nil
 }

@@ -29,6 +29,8 @@ type LoadBalance struct {
 	strategyFn     strategyFn
 	testUrl        string
 	expectedStatus string
+	Hidden         bool
+	Icon           string
 }
 
 var errStrategy = errors.New("unsupported strategy")
@@ -150,7 +152,6 @@ func strategyRoundRobin(url string) strategyFn {
 		for ; i < length; i++ {
 			id := (idx + i) % length
 			proxy := proxies[id]
-			// if proxy.Alive() {
 			if proxy.AliveForTestUrl(url) {
 				i++
 				return proxy
@@ -169,7 +170,6 @@ func strategyConsistentHashing(url string) strategyFn {
 		for i := 0; i < maxRetry; i, key = i+1, key+1 {
 			idx := jumpHash(key, buckets)
 			proxy := proxies[idx]
-			// if proxy.Alive() {
 			if proxy.AliveForTestUrl(url) {
 				return proxy
 			}
@@ -177,7 +177,6 @@ func strategyConsistentHashing(url string) strategyFn {
 
 		// when availability is poor, traverse the entire list to get the available nodes
 		for _, proxy := range proxies {
-			// if proxy.Alive() {
 			if proxy.AliveForTestUrl(url) {
 				return proxy
 			}
@@ -204,7 +203,6 @@ func strategyStickySessions(url string) strategyFn {
 		nowIdx := idx
 		for i := 1; i < maxRetry; i++ {
 			proxy := proxies[nowIdx]
-			// if proxy.Alive() {
 			if proxy.AliveForTestUrl(url) {
 				if nowIdx != idx {
 					lruCache.Delete(key)
@@ -240,6 +238,8 @@ func (lb *LoadBalance) MarshalJSON() ([]byte, error) {
 		"all":            all,
 		"testUrl":        lb.testUrl,
 		"expectedStatus": lb.expectedStatus,
+		"hidden":         lb.Hidden,
+		"icon":           lb.Icon,
 	})
 }
 
@@ -272,5 +272,7 @@ func NewLoadBalance(option *GroupCommonOption, providers []provider.ProxyProvide
 		disableUDP:     option.DisableUDP,
 		testUrl:        option.URL,
 		expectedStatus: option.ExpectedStatus,
+		Hidden:         option.Hidden,
+		Icon:           option.Icon,
 	}, nil
 }

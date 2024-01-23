@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -345,7 +346,6 @@ func handleUDPConn(packet C.PacketAdapter) {
 	if !metadata.Resolved() {
 		ip, err := resolver.ResolveIP(context.Background(), metadata.Host)
 		if err != nil {
-			packet.Drop()
 			return
 		}
 		metadata.DstIP = ip
@@ -388,7 +388,6 @@ func handleUDPConn(packet C.PacketAdapter) {
 			cond.Broadcast()
 		}()
 
-		pCtx := icontext.NewPacketConnContext(metadata)
 		proxy, rule, err := resolveMetadata(metadata)
 		if err != nil {
 			log.Warnln("[UDP] Parse metadata failed: %s", err.Error())
@@ -415,7 +414,6 @@ func handleUDPConn(packet C.PacketAdapter) {
 		if err != nil {
 			return
 		}
-		pCtx.InjectPacketConn(rawPc)
 
 		pc := statistic.NewUDPTracker(rawPc, statistic.DefaultManager, metadata, rule, 0, 0, true)
 
@@ -425,6 +423,10 @@ func handleUDPConn(packet C.PacketAdapter) {
 		case rule != nil:
 			if rule.Payload() != "" {
 				log.Infoln("[UDP] %s --> %s match %s using %s", metadata.SourceDetail(), metadata.RemoteAddress(), fmt.Sprintf("%s(%s)", rule.RuleType().String(), rule.Payload()), rawPc.Chains().String())
+				if rawPc.Chains().Last() == "REJECT-DROP" {
+					pc.Close()
+					return
+				}
 			} else {
 				log.Infoln("[UDP] %s --> %s match %s using %s", metadata.SourceDetail(), metadata.RemoteAddress(), rule.Payload(), rawPc.Chains().String())
 			}
@@ -597,7 +599,7 @@ func handleTCPConn(connCtx C.ConnContext) {
 	peekMutex.Lock()
 	defer peekMutex.Unlock()
 	_ = conn.SetReadDeadline(time.Time{}) // reset
-	handleSocket(connCtx, remoteConn)
+	handleSocket(conn, remoteConn)
 }
 
 func shouldResolveIP(rule C.Rule, metadata *C.Metadata) bool {
@@ -701,6 +703,19 @@ func getRules(metadata *C.Metadata) []C.Rule {
 	}
 }
 
+func shouldStopRetry(err error) bool {
+	if errors.Is(err, resolver.ErrIPNotFound) {
+		return true
+	}
+	if errors.Is(err, resolver.ErrIPVersion) {
+		return true
+	}
+	if errors.Is(err, resolver.ErrIPv6Disabled) {
+		return true
+	}
+	return false
+}
+
 func retry[T any](ctx context.Context, ft func(context.Context) (T, error), fe func(err error)) (t T, err error) {
 	b := &backoff.Backoff{
 		Min:    10 * time.Millisecond,
@@ -713,6 +728,9 @@ func retry[T any](ctx context.Context, ft func(context.Context) (T, error), fe f
 		if err != nil {
 			if fe != nil {
 				fe(err)
+			}
+			if shouldStopRetry(err) {
+				return
 			}
 			select {
 			case <-time.After(b.Duration()):
